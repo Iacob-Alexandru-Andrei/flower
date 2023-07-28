@@ -3,69 +3,123 @@
 Please overwrite `flwr.client.NumPyClient` or `flwr.client.Client` and create a function
 to instantiate your client.
 """
-from typing import Iterable, Tuple, Dict, Callable, List, OrderedDict, Union
-import utils
-from itertools import chain
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    OrderedDict,
+    Tuple,
+)
+
 import flwr as fl
-from flwr.common import NDArrays, Scalar
 import numpy as np
 import torch
+import torch.nn as nn
+from flwr.common import NDArrays
+from hydra.utils import instantiate
+from mypy_extensions import NamedArg
+from omegaconf import DictConfig
+from torch.utils.data import DataLoader
+
+ClientGenerator = Generator[Tuple[fl.client.NumPyClient, Dict], None, None]
+
+
+RecursiveStructure = Tuple[Any, DataLoader, ClientGenerator]
 
 
 class RecursiveClient(fl.client.NumPyClient):
-    pass
+    """Implement recursive client, which can be used to create a tree of clients.
 
+    This class is used to create a tree of clients where data can flow bidirectionally,
+    client execution is replaced with subtree execution.
+    """
 
-class RecursiveClient(fl.client.NumPyClient):
     def __init__(
         self,
         parent: fl.client.NumPyClient,
-        net_generator: Callable[[], torch.nn.Module],
+        net_generator: Callable[[], nn.Module],
         num_training_epochs: int,
         num_rounds: int,
         learning_rate: float,
         learning_rate_decay: float,
         client_parameters: NDArrays,
-        children: Iterable[Tuple[fl.client.NumPyClient, Dict]],
         node_opt: Callable[[NDArrays, Iterable[NDArrays]], NDArrays],
-        train: Callable[[NDArrays, Dict], Tuple[int, Dict]],
+        train: Callable[[nn.Module, DataLoader, Dict], Tuple[int, Dict]],
+        test: Callable[[nn.Module, DataLoader, Dict], Tuple[float, int, Dict]],
+        state: Any,
+        level: int,
+        recursive_builder: Callable[
+            [Any, int, NamedArg(bool, "test")], RecursiveStructure
+        ],
     ):  # pylint: disable=too-many-arguments
-        """Recursive client, which can be used to create a tree of clients. Client execution is replaced with subtree execution + training."""
+        """Initialise the recursive client.
 
+        Use the given local parameters, child IDs and node_opt,train and test functions.
+        #TODO: Add detailed explanation
+        """
         self.parent = parent
-        self.net = None
+        self.net: Optional[nn.Module] = None
         self.net_generator = net_generator
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device: torch.device = torch.device(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )
         self.num_epochs = num_training_epochs
         self.num_rounds = num_rounds
         self.learning_rate = learning_rate
         self.learning_rate_decay = learning_rate_decay
         self.client_parameters = client_parameters
-        self.children = children
-        self.train = train
+
+        # Procedures necessary for combining models, training models and testing models
+        self.node_opt = node_opt
+        self.train_func = train
+        self.test_func = test
+
+        # Handles building the hierarchical structure of the clients
+        self.state = state
+        self.level = level
+        self.recursive_builder = recursive_builder
 
     def fit(
         self,
         parameters: NDArrays,
         config: Dict,
     ) -> Tuple[NDArrays, int, Dict]:
-        self.client_parameters = self.node_opt(self.client_parameters, [parameters])
-        results = {
+        """Execute the node subtree and fit the node model.
+
+        #TODO: Add detailed explanation
+        """
+        results: Dict[str, List] = {
             "children_results": [],
             "train_results": [],
         }
-        total_examples = 0
-        for i in range(self.num_rounds):
-            children_results = []
+
+        self.client_parameters = self.node_opt(self.client_parameters, [parameters])
+        total_examples: int = 0
+        for _i in range(self.num_rounds):
+            children_results: List[Tuple[int, Dict]] = []
+
+            recursive_structure: RecursiveStructure = self.recursive_builder(
+                self.state, self.level, test=False
+            )
+
+            state, train_loader, children_generator = recursive_structure
+
+            self.state = state
+
             self.client_parameters = self.node_opt(
                 self.client_parameters,
-                utils.process_children(
-                    children_results, self.client_parameters, self.children
+                self.__train_process_children(
+                    children_results, self.client_parameters, children_generator
                 ),
             )
 
-            self.set_parameters(self.client_parameters)
-            train_examples, train_metrics = self.train(self.client_parameters, config)
+            train_examples, train_metrics = self.__train(
+                train_loader, self.client_parameters, config
+            )
             self.client_parameters = self.get_parameters(config)
 
             total_examples += (
@@ -78,27 +132,84 @@ class RecursiveClient(fl.client.NumPyClient):
 
         return (
             self.client_parameters,
-            float(total_examples) / self.num_rounds,
+            int(float(total_examples) / self.num_rounds),
             results,
         )
 
     def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
-        """Implements distributed evaluation for a given client."""
-        self.set_parameters(parameters)
-        loss, accuracy = test(self.net, self.valloader, self.device)
-        return float(loss), len(self.valloader), {"accuracy": float(accuracy)}
+        """Evaluate the node model and lazily evaluate the children models + parent.
+
+        #TODO: Add detailed explanation
+        """
+        recursive_structure: RecursiveStructure = self.recursive_builder(
+            self.state, self.level, test=True
+        )
+
+        state, test_loader, children_generator = recursive_structure
+        self.state = state
+
+        children_results = (
+            child.evaluate(parameters, conf) for child, conf in children_generator
+        )
+
+        loss, num_examples, test_metrics = self.__test(
+            test_loader, self.client_parameters, config
+        )
+
+        parent_results = (
+            self.__test(test_loader, parameters, config) for _ in range(1)
+        )
+
+        return (
+            loss,
+            num_examples,
+            {
+                "test_metrics": test_metrics,
+                "parent_results": parent_results,
+                "children_results": children_results,
+            },
+        )
 
     def get_parameters(self, config: Dict) -> NDArrays:
-        """Returns the parameters of the current net."""
+        """Return the parameters of the current net."""
+        self.net = self.net if self.net is not None else self.net_generator()
+
         return [val.cpu().numpy() for _, val in self.net.state_dict().items()]
 
     def set_parameters(self, parameters: NDArrays) -> None:
-        """Changes the parameters of the model using the given ones."""
-        if self.net is None:
-            self.net = self.net_generator()
+        """Change the parameters of the model using the given ones."""
+        self.net = self.net if self.net is not None else self.net_generator()
+
         params_dict = zip(self.net.state_dict().keys(), parameters)
         state_dict = OrderedDict({k: torch.Tensor(v) for k, v in params_dict})
         self.net.load_state_dict(state_dict, strict=True)
+
+    def __train_process_children(
+        self,
+        result_metrics: List,
+        parameters: NDArrays,
+        children_generator: ClientGenerator,
+    ):
+        for child, conf in children_generator:
+            child_params, *everything_else = child.fit(parameters, conf)
+            result_metrics.append(everything_else)
+            yield child_params, *everything_else
+
+    def __train(self, train_loader: DataLoader, parameters: NDArrays, config: Dict):
+        self.net = self.net if self.net is not None else self.net_generator()
+
+        self.set_parameters(parameters)
+        self.net.to(self.device)
+        self.net.train()
+        return self.train_func(self.net, train_loader, config)
+
+    def __test(self, test_loader: DataLoader, parameters: NDArrays, config: Dict):
+        self.net = self.net if self.net is not None else self.net_generator()
+
+        self.set_parameters(parameters)
+        self.net.to(self.device)
+        self.net.eval()
+        return self.test_func(self.net, test_loader, config)
 
 
 def gen_client_fn(
@@ -111,9 +222,9 @@ def gen_client_fn(
     stragglers: float,
     model: DictConfig,
 ) -> Tuple[
-    Callable[[str], FlowerClient], DataLoader
+    Callable[[str], RecursiveClient], DataLoader
 ]:  # pylint: disable=too-many-arguments
-    """Generates the client function that creates the Flower Clients.
+    """Generate the client function that creates the Flower Clients.
 
     Parameters
     ----------
@@ -142,7 +253,6 @@ def gen_client_fn(
         A tuple containing the client function that creates Flower Clients and
         the DataLoader that will be used for testing
     """
-
     # Defines a staggling schedule for each clients, i.e at which round will they
     # be a straggler. This is done so at each round the proportion of staggling
     # clients is respected
@@ -152,9 +262,8 @@ def gen_client_fn(
         )
     )
 
-    def client_fn(cid: str) -> FlowerClient:
+    def client_fn(cid: str) -> RecursiveClient:
         """Create a Flower client representing a single organization."""
-
         # Load model
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         net = instantiate(model).to(device)
@@ -164,7 +273,7 @@ def gen_client_fn(
         trainloader = trainloaders[int(cid)]
         valloader = valloaders[int(cid)]
 
-        return FlowerClient(
+        return RecursiveClient(
             net,
             trainloader,
             valloader,
