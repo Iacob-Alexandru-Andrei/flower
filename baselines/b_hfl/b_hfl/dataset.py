@@ -8,3 +8,14 @@ partitioned, please include all those functions and logic in the
 `dataset_preparation.py` module. You can use all those functions from functions/methods
 defined here of course.
 """
+
+
+import torch
+from torch.utils.data import Dataset, TensorDataset
+from utils import lazy_wrapper
+
+
+@lazy_wrapper
+def torch_tensor_to_dataset(tensor: torch.Tensor) -> Dataset:
+    """Convert a torch tensor to a torch dataset."""
+    return TensorDataset(tensor)
