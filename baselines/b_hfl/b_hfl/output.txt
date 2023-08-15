@@ -1,0 +1,250 @@
+/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/defaults_list.py:251: UserWarning: In 'base': Defaults list is missing `_self_`. See https://hydra.cc/docs/1.2/upgrades/1.0_to_1.1/default_composition_order for more information
+  warnings.warn(msg, UserWarning)
+wandb: Currently logged in as: alexiacob (camlsys). Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.15.8
+wandb: Run data is saved locally in /nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/wandb/run-20230814_210427-482g2irc
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run hardy-wave-25
+wandb: ⭐️ View project at https://wandb.ai/camlsys/B_HFL_ICLR
+wandb: 🚀 View run at https://wandb.ai/camlsys/B_HFL_ICLR/runs/482g2irc
+wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
+wandb: ERROR Control-C detected -- Run data was not synced
+/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/defaults_list.py:251: UserWarning: In 'base': Defaults list is missing `_self_`. See https://hydra.cc/docs/1.2/upgrades/1.0_to_1.1/default_composition_order for more information
+  warnings.warn(msg, UserWarning)
+wandb: Currently logged in as: alexiacob (camlsys). Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.15.8
+wandb: Run data is saved locally in /nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/wandb/run-20230814_212300-efm1kira
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run devoted-hill-39
+wandb: ⭐️ View project at https://wandb.ai/camlsys/B_HFL_ICLR
+wandb: 🚀 View run at https://wandb.ai/camlsys/B_HFL_ICLR/runs/efm1kira
+WARNING flwr 2023-08-14 21:23:00,606 | app.py:187 | Both server and strategy were provided, ignoring strategy
+client:
+  alpha: 0.5
+  network: CNN
+  get_net_generator:
+    _target_: models.get_generate_model
+    network: ${client.network}
+  get_test:
+    _target_: task_utils.test_FEMNIST
+  get_optimizer_generator:
+    _target_: task_utils.optimizer_generator_FEMNIST
+  get_train:
+    _target_: task_utils.train_FEMNIST
+  get_node_opt:
+    _target_: node_optimizers.get_fedavg_weighted_node_opt
+    alpha: ${client.alpha}
+  get_client_fn:
+    _target_: client.get_client_fn
+fed:
+  num_clients_per_round: 2
+  num_total_clients: 2
+  num_evaluate_clients_per_round: 0
+  seed: 42
+  gpus_per_client: 1
+  get_on_fit_config_fn:
+    _target_: utils.get_config
+    config_name: on_fit
+  get_on_evaluate_config_fn:
+    _target_: utils.get_config
+    config_name: on_evaluate
+  get_initial_parameters:
+    _target_: utils.get_initial_parameters
+  get_fed_eval_fn:
+    _target_: utils.get_fed_eval_fn
+  get_on_fit_metrics_agg_fn:
+    _target_: utils.get_on_fit_metrics_agg_fn
+  get_on_evaluate_metrics_agg_fn:
+    _target_: utils.get_on_fit_metrics_agg_fn
+data:
+  data_dir: /data/femnist/femnist/femnist/data
+  dataset_path: /home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/femnist/client_data_mappings/hierarchical_test/0
+  get_file_hierarchy:
+    _target_: dataset_preparation.get_wrapped_file_hierarchy
+    path: ${data.dataset_path}
+  get_transform:
+    _target_: task_utils.get_image_to_tensor_transform
+  get_target_transform:
+    _target_: task_utils.to_tensor_transform
+  get_load_dataset_file:
+    _target_: dataset.get_load_FEMNIST_file
+    input_data_dir: ${data.data_dir}
+  get_create_dataloader:
+    _target_: dataset.create_dataloader_FEMNIST
+state:
+  dataset_limit: 20
+  dataset_eviction_proportion: 0.5
+  parameters_limit: 20
+  parameters_eviction_proportion: 0.5
+  get_recursive_builder:
+    _target_: client.get_recursive_builder_wrapper
+  get_dataset_manager:
+    _target_: state_management.get_eviction_dataset_manager
+    dataset_limit: ${state.dataset_limit}
+    eviction_proportion: ${state.dataset_eviction_proportion}
+  get_load_parameters_file:
+    _target_: utils.load_parameters_file
+  get_save_parameters_to_file:
+    _target_: utils.save_parameters_to_file
+  get_parameter_manager:
+    _target_: state_management.get_eviction_parameter_manager
+    parameters_limit: ${state.parameters_limit}
+    eviction_proportion: ${state.parameters_eviction_proportion}
+strategy:
+  name: FedAvg
+  expected_accuracy: 94.3
+  init:
+    _target_: strategy.LoggingFedAvg
+wandb:
+  setup:
+    project: B_HFL_ICLR
+    group: ${data.dataset_path}
+    tags:
+    - strategy_${strategy.name}
+    - net_${client.network}
+    - seed_${fed.seed}
+    entity: null
+    mode: online
+
+[2023-08-14 21:23:00,606][flwr][WARNING] - Both server and strategy were provided, ignoring strategy
+INFO flwr 2023-08-14 21:23:00,607 | app.py:145 | Starting Flower simulation, config: ServerConfig(num_rounds=1, round_timeout=None)
+[2023-08-14 21:23:00,607][flwr][INFO] - Starting Flower simulation, config: ServerConfig(num_rounds=1, round_timeout=None)
+INFO flwr 2023-08-14 21:23:03,143 | app.py:179 | Flower VCE: Ray initialized with resources: {'memory': 8109015860.0, 'node:128.232.115.64': 1.0, 'object_store_memory': 4054507929.0, 'CPU': 12.0}
+[2023-08-14 21:23:03,143][flwr][INFO] - Flower VCE: Ray initialized with resources: {'memory': 8109015860.0, 'node:128.232.115.64': 1.0, 'object_store_memory': 4054507929.0, 'CPU': 12.0}
+INFO flwr 2023-08-14 21:23:03,143 | server.py:86 | Initializing global parameters
+[2023-08-14 21:23:03,143][flwr][INFO] - Initializing global parameters
+INFO flwr 2023-08-14 21:23:03,144 | server.py:263 | Using initial parameters provided by strategy
+[2023-08-14 21:23:03,144][flwr][INFO] - Using initial parameters provided by strategy
+INFO flwr 2023-08-14 21:23:03,144 | server.py:88 | Evaluating initial parameters
+[2023-08-14 21:23:03,144][flwr][INFO] - Evaluating initial parameters
+wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
+wandb: - 0.002 MB of 0.002 MB uploaded (0.000 MB deduped)wandb: \ 0.002 MB of 0.002 MB uploaded (0.000 MB deduped)wandb: | 0.002 MB of 0.002 MB uploaded (0.000 MB deduped)wandb: 🚀 View run devoted-hill-39 at: https://wandb.ai/camlsys/B_HFL_ICLR/runs/efm1kira
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20230814_212300-efm1kira/logs
+Error executing job with overrides: []
+Traceback (most recent call last):
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/runpy.py", line 197, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/main.py", line 245, in <module>
+    main()
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/main.py", line 191, in main
+    hist: History = fl.simulation.start_simulation(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/flwr/simulation/app.py", line 196, in start_simulation
+    hist = _fl(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/flwr/server/app.py", line 201, in _fl
+    hist = server.fit(num_rounds=config.num_rounds, timeout=config.round_timeout)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/server.py", line 89, in fit
+    res = self.strategy.evaluate(0, parameters=self.parameters)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/strategy.py", line 53, in evaluate
+    result = super().evaluate(server_round, parameters)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/flwr/server/strategy/fedavg.py", line 164, in evaluate
+    eval_res = self.evaluate_fn(server_round, parameters_ndarrays, {})
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/utils.py", line 229, in fed_eval_fn
+    results = client.evaluate(parameters, real_config)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/client.py", line 197, in evaluate
+    recursive_structure: RecursiveStructure = self.recursive_builder(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/client.py", line 415, in recursive_builder
+    child_generator: ClientGeneratorList = [
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/client.py", line 418, in <listcomp>
+    config_fn(round, child_path_dict["path"]),
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/utils.py", line 174, in file_on_fit_config_fn
+    with open(true_id / f"{config_name}_config.json") as f:
+NotADirectoryError: [Errno 20] Not a directory: '/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/femnist/client_data_mappings/hierarchical_test/0/test_chain.csv/on_evaluate_config.json'
+Traceback (most recent call last):
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/runpy.py", line 197, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/main.py", line 245, in <module>
+    main()
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 223, in run_and_report
+    raise ex
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/_internal/hydra.py", line 132, in run
+    _ = ret.return_value
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/core/utils.py", line 260, in return_value
+    raise self._return_value
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/main.py", line 191, in main
+    hist: History = fl.simulation.start_simulation(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/flwr/simulation/app.py", line 196, in start_simulation
+    hist = _fl(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/flwr/server/app.py", line 201, in _fl
+    hist = server.fit(num_rounds=config.num_rounds, timeout=config.round_timeout)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/server.py", line 89, in fit
+    res = self.strategy.evaluate(0, parameters=self.parameters)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/strategy.py", line 53, in evaluate
+    result = super().evaluate(server_round, parameters)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/flwr/server/strategy/fedavg.py", line 164, in evaluate
+    eval_res = self.evaluate_fn(server_round, parameters_ndarrays, {})
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/utils.py", line 229, in fed_eval_fn
+    results = client.evaluate(parameters, real_config)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/client.py", line 197, in evaluate
+    recursive_structure: RecursiveStructure = self.recursive_builder(
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/client.py", line 415, in recursive_builder
+    child_generator: ClientGeneratorList = [
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/client.py", line 418, in <listcomp>
+    config_fn(round, child_path_dict["path"]),
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/utils.py", line 174, in file_on_fit_config_fn
+    with open(true_id / f"{config_name}_config.json") as f:
+NotADirectoryError: [Errno 20] Not a directory: '/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/femnist/client_data_mappings/hierarchical_test/0/test_chain.csv/on_evaluate_config.json'
+Traceback (most recent call last):
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/runpy.py", line 197, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/main.py", line 18, in <module>
+    from common_types import (
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/b_hfl/common_types.py", line 18, in <module>
+    import torch
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/torch/__init__.py", line 865, in <module>
+    from torch import distributions as distributions
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/torch/distributions/__init__.py", line 116, in <module>
+    from .wishart import Wishart
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/torch/distributions/wishart.py", line 28, in <module>
+    class Wishart(ExponentialFamily):
+  File "/nfs-share/aai30/b_hfl/flower/baselines/b_hfl/.venv/lib/python3.9/site-packages/torch/distributions/wishart.py", line 68, in Wishart
+    df: Union[torch.Tensor, Number],
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/typing.py", line 274, in inner
+    return cached(*args, **kwds)
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/typing.py", line 354, in __getitem__
+    return self._getitem(self, parameters)
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/typing.py", line 470, in Union
+    return _UnionGenericAlias(self, parameters)
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/typing.py", line 743, in __init__
+    self.__args__ = tuple(... if a is _TypingEllipsis else
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/typing.py", line 714, in __setattr__
+    if _is_dunder(attr) or attr in ('_name', '_inst', '_nparams'):
+  File "/home/aai30/.pyenv/versions/3.9.17/lib/python3.9/typing.py", line 666, in _is_dunder
+    return attr.startswith('__') and attr.endswith('__')
+KeyboardInterrupt

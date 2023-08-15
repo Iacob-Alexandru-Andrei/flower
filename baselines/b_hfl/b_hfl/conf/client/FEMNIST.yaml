@@ -1,0 +1,25 @@
+alpha: 0.5
+network: "CNN"
+
+get_net_generator:
+  _target_: "models.get_generate_model"
+  network:  ${client.network}
+
+get_test: 
+  _target_: "task_utils.test_FEMNIST"
+
+get_optimizer_generator:
+  _target_: "task_utils.optimizer_generator_FEMNIST"
+
+get_train:
+  _target_: "task_utils.train_FEMNIST"
+
+get_node_opt:
+  _target_: "node_optimizers.get_fedavg_weighted_node_opt"
+  alpha: ${client.alpha}
+
+get_client_fn:
+  _target_: "client.get_client_fn"
+
+
+

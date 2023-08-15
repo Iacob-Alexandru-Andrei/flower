@@ -8,10 +8,10 @@ database or other hierarchical structure with the necesary work.
 import abc
 from abc import ABC
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
 
 from flwr.common import NDArrays
-from torch.utils.data import ChainDataset, Dataset
+from torch.utils.data import ChainDataset, Dataset, ConcatDataset
 
 
 class DatasetManager(ABC):
@@ -23,7 +23,10 @@ class DatasetManager(ABC):
 
     @abc.abstractmethod
     def register_chain_dataset(
-        self, path: Path, chain_files: Iterable[Path], chain_dataset: ChainDataset
+        self,
+        path: Path,
+        chain_files: Iterable[Path],
+        chain_dataset: Union[ChainDataset, ConcatDataset],
     ) -> Any:
         """Register a chain dataset with the dataset manager."""
 
@@ -78,12 +81,13 @@ class EvictionDatasetManager(DatasetManager):
     def unload_children_datasets(self, paths: Iterable[Path]) -> None:
         """Unload the children datasets of a given path."""
         for path in paths:
-            del self.dataset_dict[path]
+            self.dataset_dict.pop(path, None)
 
     def unload_chain_dataset(self, path: Path) -> None:
         """Unload a chain dataset."""
-        del self.chained_paths[path]
-        del self.dataset_dict[path]
+        if "base" not in path.name:
+            self.chained_paths.pop(path, None)
+            self.dataset_dict.pop(path, None)
 
     def __contains__(self, path: Path) -> bool:
         """Check if a dataset is in the dataset manager."""
@@ -107,16 +111,15 @@ class EvictionDatasetManager(DatasetManager):
             del self.dataset_dict[path]
 
 
+def get_eviction_dataset_manager(
+    dataset_limit: int, eviction_proportion: float
+) -> EvictionDatasetManager:
+    """Get an eviction dataset manager."""
+    return EvictionDatasetManager(dataset_limit, eviction_proportion)
+
+
 class ParameterManager(ABC):
     """Abstract base class for parameter managers."""
-
-    @abc.abstractmethod
-    def register_parameters(
-        self,
-        path: Path,
-        parameters: NDArrays,
-    ) -> NDArrays:
-        """Register a set of parameters with the parameter manager."""
 
     @abc.abstractmethod
     def get_parameters(self, path: Path) -> NDArrays:
@@ -127,12 +130,16 @@ class ParameterManager(ABC):
         """Set a set of parameters in the parameter manager."""
 
     @abc.abstractmethod
-    def unload_children_parameters(self, paths: Iterable[Path]) -> None:
-        """Unload the children parameters of a given path."""
+    def save_parameters(self, path: Path, parameters: Optional[NDArrays]) -> None:
+        """Save a set of parameters to a file."""
 
     @abc.abstractmethod
-    def unload_parameters(self, path: Path) -> None:
+    def unload_parameters(self, path: Path, parameters: Optional[NDArrays]) -> None:
         """Unload the parameters of a given path."""
+
+    @abc.abstractmethod
+    def unload_children_parameters(self, paths: Iterable[Path]) -> None:
+        """Unload the children parameters of a given path."""
 
     @abc.abstractmethod
     def __contains__(self, path: Path) -> bool:
@@ -154,7 +161,37 @@ class EvictionParameterManager(ABC):
         self.eviction_proportion = eviction_proportion
         self.save_parameters_to_file = save_parameters_to_file
 
-    def register_parameters(self, path: Path, parameters: NDArrays) -> NDArrays:
+    def get_parameters(self, path: Path) -> NDArrays:
+        """Get a set of parameters from the parameter manager."""
+        return self.parameter_dict[path]
+
+    def set_parameters(self, path: Path, parameters: NDArrays) -> None:
+        """Set a set of parameters in the parameter manager."""
+        if path not in self:
+            self._register_parameters(path, parameters)
+        self.parameter_dict[path] = parameters
+
+    def save_parameters(self, path: Path, parameters: Optional[NDArrays]) -> None:
+        """Save a set of parameters to a file."""
+        if parameters is not None:
+            self.set_parameters(path, parameters)
+        self.save_parameters_to_file(path, self.parameter_dict[path])
+
+    def unload_parameters(self, path: Path, parameters: Optional[NDArrays]) -> None:
+        """Unload the parameters of a given path."""
+        self.save_parameters(path, parameters)
+        self.parameter_dict.pop(path, None)
+
+    def unload_children_parameters(self, paths: Iterable[Path]) -> None:
+        """Unload the children parameters of a given path."""
+        for path in paths:
+            self.unload_parameters(path, None)
+
+    def __contains__(self, path: Path) -> bool:
+        """Check if a set of parameters is in the parameter manager."""
+        return path in self.parameter_dict
+
+    def _register_parameters(self, path: Path, parameters: NDArrays) -> NDArrays:
         """Register a set of parameters with the parameter manager."""
         if len(self.parameter_dict) < self.parameter_limit:
             self.parameter_dict[path] = parameters
@@ -164,30 +201,6 @@ class EvictionParameterManager(ABC):
         self.parameter_dict[path] = parameters
         return parameters
 
-    def get_parameters(self, path: Path) -> NDArrays:
-        """Get a set of parameters from the parameter manager."""
-        return self.parameter_dict[path]
-
-    def set_parameters(self, path: Path, parameters: NDArrays) -> None:
-        """Set a set of parameters in the parameter manager."""
-        if path not in self:
-            self.register_parameters(path, parameters)
-        self.parameter_dict[path] = parameters
-
-    def unload_parameters(self, path: Path) -> None:
-        """Unload the parameters of a given path."""
-        self.save_parameters_to_file(path, self.parameter_dict[path])
-        del self.parameter_dict[path]
-
-    def unload_children_parameters(self, paths: Iterable[Path]) -> None:
-        """Unload the children parameters of a given path."""
-        for path in paths:
-            self.unload_parameters(path)
-
-    def __contains__(self, path: Path) -> bool:
-        """Check if a set of parameters is in the parameter manager."""
-        return path in self.parameter_dict
-
     def _evict(self) -> None:
         """Evict a fraction of datasets from the dataset manager."""
         to_evict: List[Path] = [
@@ -196,7 +209,18 @@ class EvictionParameterManager(ABC):
             if i < int(self.eviction_proportion * self.parameter_limit)
         ]
         for path in to_evict:
-            self.unload_parameters(path)
+            self.unload_parameters(path, None)
+
+
+def get_eviction_parameter_manager(
+    parameters_limit: int,
+    save_parameters_to_file: Callable[[Path, NDArrays], None],
+    eviction_proportion: float,
+) -> EvictionParameterManager:
+    """Get an eviction dataset manager."""
+    return EvictionParameterManager(
+        parameters_limit, save_parameters_to_file, eviction_proportion
+    )
 
 
 def get_chain_paths(path: Path) -> Iterable[Path]:
@@ -223,7 +247,7 @@ def process_chain_file(
         return dataset_manager.get_dataset(path)
 
     chain_files: Iterable[Path] = get_chain_paths(path)
-    chain_dataset: ChainDataset = ChainDataset(
+    chain_dataset: Union[ChainDataset, ConcatDataset] = ConcatDataset(
         (process_file(file, load_file, dataset_manager) for file in chain_files)
     )
     dataset_manager.register_chain_dataset(path, chain_files, chain_dataset)
@@ -275,28 +299,5 @@ def load_parameters(
         return parameter_manager.get_parameters(path)
 
     parameters: NDArrays = load_parameters_file(path)
-    parameter_manager.register_parameters(path, parameters)
+    parameter_manager.set_parameters(path, parameters)
     return parameters
-
-
-def extract_file_from_files(files: List[Path], file_type) -> Optional[Path]:
-    """Extract a file of a given type from a list of files."""
-    dataloader_file = None
-    any((dataloader_file := file) for file in files if file_type in file.name)
-
-    return dataloader_file
-
-
-def extract_chain_file_from_files(files: List[Path], file_type) -> Optional[Path]:
-    """Extract a chain file of a given type from a list of files.
-
-    A chain file is a file that contains a list of paths to other files.
-    """
-    dataloader_file = None
-    any(
-        (dataloader_file := file)
-        for file in files
-        if file_type in file.name and "chain" in file.name
-    )
-
-    return dataloader_file

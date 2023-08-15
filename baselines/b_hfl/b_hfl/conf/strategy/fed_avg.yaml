@@ -1,0 +1,4 @@
+name: FedAvg
+expected_accuracy: 94.3
+init:
+  _target_: "strategy.LoggingFedAvg"

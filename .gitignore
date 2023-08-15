@@ -15,12 +15,17 @@ examples/**/dev/*.sh
 
 # Flower Baselines
 baselines/datasets/leaf
+baselines/b_hfl/b_hfl/wandb
+baselines/b_hfl/b_hfl/outputs
 
 # macOS
 .DS_Store
 
 # Editor
 .vscode
+
+# Weights and bises files 
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

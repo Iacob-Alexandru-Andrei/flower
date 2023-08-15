@@ -1,0 +1,27 @@
+num_clients_per_round: 2
+num_total_clients: 2
+num_evaluate_clients_per_round: 0
+seed: 42
+
+gpus_per_client: 0
+cpus_per_client: 4
+
+get_on_fit_config_fn:
+  _target_: "utils.get_config"
+  config_name: "on_fit"
+
+get_on_evaluate_config_fn:
+  _target_: "utils.get_config"
+  config_name: "on_evaluate"
+
+get_initial_parameters:
+  _target_: "utils.get_initial_parameters"
+
+get_fed_eval_fn:
+  _target_: "utils.get_fed_eval_fn"
+
+get_on_fit_metrics_agg_fn:
+  _target_: "utils.get_on_fit_metrics_agg_fn"
+
+get_on_evaluate_metrics_agg_fn:
+  _target_: "utils.get_on_fit_metrics_agg_fn"

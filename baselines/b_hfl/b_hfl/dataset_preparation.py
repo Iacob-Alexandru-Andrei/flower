@@ -6,10 +6,18 @@ first download the dataset and partition it and then run the experiments, please
 uncomment the lines below and tell us in the README.md (see the "Running the Experiment"
 block) that this file should be executed first.
 """
-# import hydra
-# from hydra.core.hydra_config import HydraConfig
-# from hydra.utils import call, instantiate
-# from omegaconf import DictConfig, OmegaConf
+import csv
+import json
+import tarfile
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TypedDict
+from cerberus.validator import BareValidator, Validator, schema_registry
+from common_types import FileHierarchy, ClientFileHierarchy, ConfigFileHierarchy
+from config_schema import get_recursive_client_schema
+
+import gdown
+from regex import B
 
 
 # @hydra.main(config_path="conf", config_name="base", version_base=None)
@@ -29,34 +37,36 @@ block) that this file should be executed first.
 #     # Please use the Hydra config style as much as possible specially
 #     # for parts that can be customised (e.g. how data is partitioned)
 
-# if __name__ == "__main__":
 
-import csv
+def download_FEMNIST(dataset_dir: Path = Path("data/femnist")) -> None:
+    """Download and extract the FEMNIST dataset."""
+    #  Download compressed dataset
+    data_file = dataset_dir / "femnist.tar.gz"
+    if not data_file.exists():
+        id = "1-CI6-QoEmGiInV23-n_l6Yd8QGWerw8-"
+        gdown.download(
+            f"https://drive.google.com/uc?export=download&confirm=pbef&id={id}",
+            str(dataset_dir / "femnist.tar.gz"),
+        )
 
-#     download_and_preprocess()
-from collections import defaultdict
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, TypedDict, Callable
+    decompressed_dataset_dir = dataset_dir / "femnist"
+    # Decompress dataset
+    if not decompressed_dataset_dir.exists():
+        with tarfile.open(data_file, "r:gz") as tar:
+            tar.extractall(decompressed_dataset_dir)
 
-import torch
-from PIL import Image
-from PIL.Image import Image as ImageType
-from torch.utils.data import Dataset
+    print(f"Dataset extracted in {dataset_dir}")
 
 
 # Any is used to represent "FilehHierarchy" because it is a recursive type
 # and MyPy does not have proper support for recursive types.
-class FileHierarchy(TypedDict):
-    """Dictionary representation of the file system."""
-
-    parent: Optional[Any]
-    parent_path: Optional[Path]
-    path: Path
-    files: List[Path]
-    children: List[Any]
 
 
-def build_path_dict(
+def get_wrapped_file_hierarchy(path: str) -> FileHierarchy:
+    return get_file_hierarchy(Path(path))
+
+
+def get_file_hierarchy(
     path: Path,
     parent_path: Optional[Path] = None,
     parent: Optional[FileHierarchy] = None,
@@ -71,12 +81,16 @@ def build_path_dict(
         "children": [],
     }
     # Build the tree
-    if path.is_file():
-        path_dict["files"].append(path)
-    else:
-        for _, child_path in enumerate(path.iterdir()):
+
+    for _, child_path in enumerate(path.iterdir()):
+        if child_path.is_file():
+            if not child_path.name.startswith("_") and not child_path.name.startswith(
+                "."
+            ):
+                path_dict["files"].append(child_path)
+        else:
             path_dict["children"].append(
-                build_path_dict(
+                get_file_hierarchy(
                     child_path,
                     parent_path,
                     path_dict,
@@ -98,16 +112,23 @@ def extract_child_mapping(root: Path) -> Dict[str, Path]:
     Dict[str, Path]
         A mapping from child names to paths.
     """
-    path_dict = build_path_dict(root)
+    path_dict = get_file_hierarchy(root)
     mapping: Dict[str, Path] = {}
     for child in path_dict["children"]:
         mapping[f"r_{child['path'].name}"] = child["path"]
     return mapping
 
 
-class ClientFileHierarchy(TypedDict):
-    name: str
-    children: List[Any]
+schema_registry.add(
+    "client_file_hierarchy_schema",
+    {
+        "name": {"type": "string", "required": True},
+        "children": {
+            "type": "list",
+            "schema": {"type": "dict", "schema": "client_file_hierarchy_schema"},
+        },
+    },
+)
 
 
 def child_map_to_file_hierarchy(
@@ -122,6 +143,13 @@ def child_map_to_file_hierarchy(
     root : Path
         The root directory where the file hierarchy will be created.
     """
+    client_file_hierarchy_schema = schema_registry.get("client_file_hierarchy_schema")
+
+    validator: BareValidator = Validator(client_file_hierarchy_schema)  # type: ignore
+
+    if not validator.validate(logical_mapping):
+        raise ValueError(f"Invalid client hierarchy: {validator.errors}")
+
     child_mapping = extract_child_mapping(in_root)
 
     def rec_child_map_to_file_hierarchy(
@@ -142,7 +170,8 @@ def child_map_to_file_hierarchy(
             client_directory = child_mapping[name]
             for path in client_directory.iterdir():
                 if path.is_file():
-                    chain_files[path.stem].append(path)
+                    if not path.name.startswith("_") and not path.name.startswith("."):
+                        chain_files[f"{path.stem}_base"].append(path)
 
         for child in children:
             child_chain_files = rec_child_map_to_file_hierarchy(
@@ -158,180 +187,222 @@ def child_map_to_file_hierarchy(
             with open(new_path, "w") as f:
                 writer = csv.writer(f)
                 for path in files:
-                    writer.writerow(str(path))
-            print(files)
+                    writer.writerow([str(path)])
+
             return_chain_files[file_type] = new_path
-        print(cur_path)
 
         return return_chain_files
 
     rec_child_map_to_file_hierarchy(logical_mapping, out_root)
 
 
-child_map_to_file_hierarchy(
+schema_registry.add(
+    "config_file_hierarchy_schema",
     {
-        "name": "0",
-        "children": [
-            {
-                "name": "1",
-                "children": [
-                    {
-                        "name": "3",
-                        "children": [
-                            {"name": "r_0", "children": []},
-                            {"name": "r_1", "children": []},
-                        ],
-                    },
-                    {
-                        "name": "4",
-                        "children": [
-                            {"name": "r_0", "children": []},
-                            {"name": "r_0", "children": []},
-                        ],
-                    },
-                ],
-            },
-            {
-                "name": "2",
-                "children": [
-                    {
-                        "name": "5",
-                        "children": [
-                            {"name": "r_0", "children": []},
-                            {"name": "r_1", "children": []},
-                        ],
-                    },
-                    {
-                        "name": "6",
-                        "children": [
-                            {"name": "r_2", "children": []},
-                            {"name": "r_0", "children": []},
-                        ],
-                    },
-                ],
-            },
-        ],
+        "on_fit_config": {"type": "dict", "required": True},
+        "on_evaluate_config": {"type": "dict", "required": True},
+        "children": {
+            "type": "list",
+            "schema": {"type": "dict", "schema": "config_file_hierarchy_schema"},
+        },
     },
-    Path("data/test/in"),
-    Path("data/test/out"),
 )
-import tarfile
-
-import gdown
 
 
-def download_FEMNIST(dataset_dir: Path = Path("/data/femnist")) -> None:
-    """Download and extract the FEMNIST dataset."""
-    #  Download compressed dataset
-    if not (dataset_dir / "femnist.tar.gz").exists():
-        id = "1-CI6-QoEmGiInV23-n_l6Yd8QGWerw8-"
-        gdown.download(
-            f"https://drive.google.com/uc?export=download&confirm=pbef&id={id}",
-            str(dataset_dir / "femnist.tar.gz"),
+def config_map_to_file_hierarchy(
+    logical_mapping: ConfigFileHierarchy,
+    out_root: Path,
+    train_config_schema: Dict[str, Any],
+    test_config_schema: Dict[str, Any],
+) -> None:
+    """Create a file hierarchy based on a logical mapping.
+
+    Parameters
+    ----------
+    mapping : Dict[str, Path]
+        A mapping from logical names to paths.
+    root : Path
+        The root directory where the file hierarchy will be created.
+    """
+    config_file_hierarchy_schema = schema_registry.get("config_file_hierarchy_schema")
+    validator: BareValidator = Validator(config_file_hierarchy_schema)  # type: ignore
+
+    if not validator.validate(logical_mapping):
+        raise ValueError(
+            f"Invalid config hierarchy: {validator.errors}, {logical_mapping}"
         )
 
-    # Decompress dataset
-    if not dataset_dir.exists():
-        with tarfile.open(dataset_dir / "femnist.tar.gz", "r:gz") as tar:
-            tar.extractall(dataset_dir)
+    train_config_validator: BareValidaVator = Validator(train_config_schema)  # type: ignore
+    test_config_validator: BareValidaVator = Validator(test_config_schema)  # type: ignore
 
-    print(f"Dataset extracted in {dataset_dir}")
+    def rec_config_map_to_file_hierarchy(
+        config_file_hierarchy: ConfigFileHierarchy,
+        cur_path: Path,
+    ) -> None:
+        on_fit_config = config_file_hierarchy["on_fit_config"]
+
+        if not train_config_validator.validate(on_fit_config):
+            raise ValueError(
+                f"Invalid config: {train_config_validator.errors}, {on_fit_config}"
+            )
+
+        on_evaluate_config = config_file_hierarchy["on_evaluate_config"]
+
+        if not test_config_validator.validate(on_evaluate_config):
+            raise ValueError(
+                f"Invalid config: {train_config_validator.errors}, {on_evaluate_config}"
+            )
+
+        with open(cur_path / "on_fit_config.json", "w") as f:
+            json.dump(on_fit_config, f)
+
+        with open(cur_path / "on_evaluate_config.json", "w") as f:
+            json.dump(on_evaluate_config, f)
+
+        folders = (folder for folder in cur_path.iterdir() if folder.is_dir())
+
+        for child_config, folder in zip(config_file_hierarchy["children"], folders):
+            rec_config_map_to_file_hierarchy(child_config, folder)
+
+    rec_config_map_to_file_hierarchy(logical_mapping, out_root)
 
 
-class FEMNIST(Dataset):
-    """Create a PyTorch dataset from the FEMNIST dataset."""
+def get_uniform_configs(
+    path_dict: FileHierarchy, on_fit_config: Dict, on_evaluate_config: Dict
+) -> ConfigFileHierarchy:
+    """Get a uniform config hierarchy."""
+    return {
+        "on_fit_config": on_fit_config,
+        "on_evaluate_config": on_evaluate_config,
+        "children": [
+            get_uniform_configs(child, on_fit_config, on_evaluate_config)
+            for child in path_dict["children"]
+        ],
+    }
 
-    def __init__(
-        self,
-        mapping: Path,
-        data_dir: Path,
-        name: str = "train",
-        transform: Optional[Callable[[ImageType], Any]] = None,
-        target_transform: Optional[Callable[[int], Any]] = None,
-    ):
-        """Initialize the FEMNIST dataset.
 
-        Args:
-            mapping (Path): path to the mapping folder containing the .csv files.
-            data_dir (Path): path to the dataset folder. Defaults to data_dir.
-            name (str): name of the dataset to load, train or test.
-            transform (Optional[Callable[[ImageType], Any]], optional): transform function to be applied to the ImageType object.
-            target_transform (Optional[Callable[[int], Any]], optional): transform function to be applied to the label.
-        """
-        self.data_dir = data_dir
-        self.mapping = mapping
-        self.name = name
+default_FEMNIST_recursive_fit_config = {
+    "rounds": [
+        {
+            "client_config": {
+                "num_rounds": 1,
+                "fit_fraction": 1.0,
+                "train_children": True,
+                "train_chain": False,
+                "train_proxy": False,
+            },
+            "dataloader_config": {
+                "batch_size": 8,
+                "num_workers": 2,
+                "shuffle": False,
+                "test": False,
+            },
+            "parameter_config": {},
+            "net_config": {},
+            "run_config": {
+                "epochs": 1,
+                "client_learning_rate": 0.01,
+                "weight_decay": 0.001,
+            },
+        }
+    ]
+}
 
-        self.data: Sequence[Tuple[str, int]] = self._load_dataset()
-        self.transform: Optional[Callable[[ImageType], Any]] = transform
-        self.target_transform: Optional[Callable[[int], Any]] = target_transform
+default_FEMNIST_recursive_evaluate_config = {
+    "rounds": [
+        {
+            "client_config": {
+                "eval_fraction": 1.0,
+                "test_children": True,
+                "test_chain": True,
+                "test_proxy": False,
+            },
+            "dataloader_config": {
+                "batch_size": 8,
+                "num_workers": 2,
+                "shuffle": False,
+                "test": False,
+            },
+            "parameter_config": {},
+            "net_config": {},
+            "run_config": {
+                "epochs": 1,
+                "client_learning_rate": 0.01,
+                "weight_decay": 0.001,
+            },
+        }
+    ]
+}
 
-    def __getitem__(self, index) -> Tuple[Any, Any]:
-        """Function used by PyTorch to get a sample.
 
-        Args:
-            index (_type_): index of the sample.
+if __name__ == "__main__":
+    src_folder = Path(
+        "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/fed_natural"
+    )
+    out_folder = Path(
+        "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/hierarchical_test"
+    )
 
-        Returns
-        -------
-            Tuple[Any, Any]: couple (sample, label).
-        """
-        sample_path, label = self.data[index]
+    child_map_to_file_hierarchy(
+        {
+            "name": "0",
+            "children": [
+                {
+                    "name": "1",
+                    "children": [
+                        {
+                            "name": "3",
+                            "children": [
+                                {"name": "r_0", "children": []},
+                                {"name": "r_1", "children": []},
+                            ],
+                        },
+                        {
+                            "name": "4",
+                            "children": [
+                                {"name": "r_0", "children": []},
+                                {"name": "r_0", "children": []},
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "name": "2",
+                    "children": [
+                        {
+                            "name": "5",
+                            "children": [
+                                {"name": "r_0", "children": []},
+                                {"name": "r_1", "children": []},
+                            ],
+                        },
+                        {
+                            "name": "6",
+                            "children": [
+                                {"name": "r_2", "children": []},
+                                {"name": "r_0", "children": []},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+        src_folder,
+        out_folder,
+    )
 
-        # Convert to the full path
-        full_sample_path: Path = self.data_dir / self.name / sample_path
+    path_dict = get_file_hierarchy(out_folder)
+    uniform_config_map = get_uniform_configs(
+        path_dict,
+        default_FEMNIST_recursive_fit_config,
+        default_FEMNIST_recursive_evaluate_config,
+    )
 
-        img: ImageType = Image.open(full_sample_path).convert("L")
+    train_config_schema = get_recursive_client_schema(False)
+    test_config_schema = get_recursive_client_schema(True)
 
-        if self.transform is not None:
-            img = self.transform(img)
+    config_map_to_file_hierarchy(
+        uniform_config_map, out_folder, train_config_schema, test_config_schema
+    )
 
-        if self.target_transform is not None:
-            label = self.target_transform(label)
-
-        return img, label
-
-    def __len__(self) -> int:
-        """Function used by PyTorch to get the length of the dataset as number of
-        samples.
-
-        Returns
-        -------
-            int: the length of the dataset.
-        """
-        return len(self.data)
-
-    def _load_dataset(self) -> Sequence[Tuple[str, int]]:
-        """Load the paths and labels of the partition Preprocess the dataset for faster
-        future loading If opened for the first time.
-
-        Raises
-        ------
-            ValueError: raised if the mapping file doesn't exists
-
-        Returns
-        -------
-            Sequence[Tuple[str, int]]: partition asked as a sequence of couples (path_to_file, label)
-        """
-        preprocessed_path: Path = (self.mapping / self.name).with_suffix(".pt")
-        if preprocessed_path.exists():
-            return torch.load(preprocessed_path)
-        else:
-            csv_path = (self.mapping / self.name).with_suffix(".csv")
-            if not csv_path.exists():
-                raise ValueError(f"Required files do not exist, path: {csv_path}")
-            else:
-                with open(csv_path, mode="r") as csv_file:
-                    csv_reader = csv.reader(csv_file)
-                    # Ignore header
-                    next(csv_reader)
-
-                    # Extract the samples and the labels
-                    partition: Sequence[Tuple[str, int]] = [
-                        (sample_path, int(label_id))
-                        for _, sample_path, _, label_id in csv_reader
-                    ]
-
-                    # Save for future loading
-                    torch.save(partition, preprocessed_path)
-                    return partition
+    # download_and_preprocess()
