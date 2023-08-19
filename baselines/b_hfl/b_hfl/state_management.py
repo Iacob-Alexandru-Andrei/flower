@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
 
 from flwr.common import NDArrays
-from torch.utils.data import ChainDataset, Dataset, ConcatDataset
+from torch.utils.data import ChainDataset, ConcatDataset, Dataset
 
 
 class DatasetManager(ABC):
@@ -142,6 +142,10 @@ class ParameterManager(ABC):
         """Unload the children parameters of a given path."""
 
     @abc.abstractmethod
+    def cleanup(self):
+        """Cleanup the parameter manager."""
+
+    @abc.abstractmethod
     def __contains__(self, path: Path) -> bool:
         """Check if a set of parameters is in the parameter manager."""
 
@@ -201,6 +205,13 @@ class EvictionParameterManager(ABC):
         self.parameter_dict[path] = parameters
         return parameters
 
+    def cleanup(self) -> None:
+        """Cleanup the parameter manager."""
+        print("Saving parameters to disk")
+        for path in self.parameter_dict.keys():
+            self.save_parameters(path, None)
+        self.parameter_dict = {}
+
     def _evict(self) -> None:
         """Evict a fraction of datasets from the dataset manager."""
         to_evict: List[Path] = [
@@ -208,6 +219,7 @@ class EvictionParameterManager(ABC):
             for i, item in enumerate(self.parameter_dict.keys())
             if i < int(self.eviction_proportion * self.parameter_limit)
         ]
+        print("Evicting parameters")
         for path in to_evict:
             self.unload_parameters(path, None)
 

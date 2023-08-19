@@ -5,9 +5,11 @@ example, you may define here things like: loading a model from a checkpoint, sav
 results, plotting.
 """
 import json
+import os
 import random
+import shutil
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flwr as fl
 import matplotlib.pyplot as plt
@@ -16,17 +18,18 @@ import pandas as pd
 import torch
 from common_types import (
     ClientFN,
+    DatasetLoader,
     LoadConfig,
+    ParametersLoader,
     RecursiveBuilder,
     TransformType,
-    ParametersLoader,
-    DatasetLoader,
 )
-from dataset_preparation import FileHierarchy
+from dataset_preparation import FolderHierarchy
+from flwr.common import Parameters, ndarrays_to_parameters
 from flwr.common.typing import NDArrays
-from flwr.server.history import History
+from server import History
 from torch.utils.data import Dataset, TensorDataset
-from flwr.common import ndarrays_to_parameters, Parameters
+import ray
 
 
 def lazy_wrapper(x: Callable) -> Callable[[], Any]:
@@ -38,8 +41,8 @@ def lazy_wrapper(x: Callable) -> Callable[[], Any]:
 
 
 def decorate_client_fn_with_recursive_builder(
-    get_client_recursive_builder: Callable[[FileHierarchy], RecursiveBuilder],
-    path_dict: FileHierarchy,
+    get_client_recursive_builder: Callable[[FolderHierarchy], RecursiveBuilder],
+    path_dict: FolderHierarchy,
 ) -> Callable[[ClientFN], Callable[[str], fl.client.Client]]:
     """Decorate a client function with a recursive builder."""
     i: int = 0
@@ -112,7 +115,9 @@ def save_parameters_to_file(path: Path, parameters: NDArrays) -> None:
     The file type is inferred from the file extension. Add new file types here.
     """
     if path.suffix == ".npy" or path.suffix == ".npz" or path.suffix == ".np":
-        np.savez_compressed(path.with_suffix(""), parameters)
+        np.savez(str(path.with_suffix("")), *parameters)
+    elif path.suffix == ".pt":
+        torch.save(parameters, path)
     else:
         raise ValueError(f"Unknown parameter format: {path.suffix}")
 
@@ -120,9 +125,12 @@ def save_parameters_to_file(path: Path, parameters: NDArrays) -> None:
 @lazy_wrapper
 def load_parameters_file(path: Path) -> NDArrays:
     """Load parameters from a file."""
-    return [
-        arr for val in np.load(file=path, allow_pickle=True).values() for arr in val
-    ]
+    if path.suffix == ".npy" or path.suffix == ".npz" or path.suffix == ".np":
+        return list(np.load(file=str(path), allow_pickle=True).values())
+    elif path.suffix == ".pt":
+        return torch.load(path)
+    else:
+        raise ValueError(f"Unknown parameter format: {path.suffix}")
 
 
 def get_device() -> torch.device:
@@ -139,11 +147,8 @@ def seed_everything(seed: int) -> None:
 
 def plot_metric_from_history(
     hist: History,
-    dataset_name: str,
-    strategy_name: str,
-    expected_maximum: float,
-    save_plot_path: Path,
     output_directory: Path,
+    name: str,
 ) -> None:
     """Plot classification accuracy from history.
 
@@ -154,17 +159,14 @@ def plot_metric_from_history(
         expected_maximum (float): Expected final accuracy.
         save_plot_path (Path): Where to save the plot.
     """
-    rounds, values = zip(*hist.metrics_centralized["accuracy"])
+    rounds, values = zip(*hist.losses_centralized)
     plt.figure()
-    plt.plot(rounds, np.asarray(values) * 100, label=strategy_name)  # Accuracy 0-100%
-    # Set expected graph
-    plt.axhline(y=expected_maximum, color="r", linestyle="--")
-    plt.title(f"Centralized Validation - {dataset_name}")
+    plt.plot(rounds, np.asarray(values) * 100)  # Accuracy 0-100%
+    plt.title("Centralized Validation")
     plt.xlabel("Rounds")
     plt.ylabel("Accuracy")
     plt.legend(loc="upper left")
-    plt.savefig(save_plot_path)
-    plt.savefig(output_directory / "graph.png")
+    plt.savefig(output_directory / f"{name}.png")
     plt.close()
 
 
@@ -175,7 +177,7 @@ def get_config(config_name: str) -> Callable[[int, Path], Dict]:
         """Return the config for the given round."""
         with open(true_id / f"{config_name}_config.json") as f:
             configs = json.load(f)
-            if len(configs["rounds"]) < server_round:
+            if len(configs["rounds"]) <= server_round:
                 return configs["rounds"][-1]
             else:
                 return configs["rounds"][server_round]
@@ -183,23 +185,27 @@ def get_config(config_name: str) -> Callable[[int, Path], Dict]:
     return file_on_fit_config_fn
 
 
-def extract_file_from_files(files: List[Path], file_type) -> Optional[Path]:
+def extract_file_from_files(files: Path, file_type) -> Optional[Path]:
     """Extract a file of a given type from a list of files."""
     to_extract: Optional[Path] = None
-    any((to_extract := file) for file in files if file_type in file.name)
+    any(
+        (to_extract := file)
+        for file in files.iterdir()
+        if file.is_file() and file_type in file.name
+    )
 
     return to_extract
 
 
 @lazy_wrapper
 def get_initial_parameters(
-    path_dict: FileHierarchy,
+    path_dict: FolderHierarchy,
     load_parameters_file: ParametersLoader,
     net_generator: Callable,
     on_fit_config_fn: LoadConfig,
 ) -> Parameters:
     """Get the initial parameters for the server."""
-    parameters_file = extract_file_from_files(path_dict["files"], "parameters")
+    parameters_file = extract_file_from_files(path_dict["path"], "parameters")
     if parameters_file is not None:
         return ndarrays_to_parameters(load_parameters_file(parameters_file))
     else:
@@ -215,26 +221,138 @@ def get_initial_parameters(
         )
 
 
-def get_fed_eval_fn(
-    root_path: Path,
-    client_fn: ClientFN,
-    recursive_builder: RecursiveBuilder,
-    on_evaluate_config_function: LoadConfig,
-) -> Callable[[int, NDArrays, Dict], Optional[Tuple[float, Dict]]]:
-    """Get the federated evaluation function."""
-    client = client_fn(str(root_path), root_path, None, recursive_builder)
-
-    def fed_eval_fn(
-        server_round: int, parameters: NDArrays, config: Dict
-    ) -> Optional[Tuple[float, Dict]]:
-        real_config = on_evaluate_config_function(server_round, root_path)
-        results = client.evaluate(parameters, real_config)
-        loss, _, metrics = results
-        return loss, metrics
-
-    return fed_eval_fn
-
-
 # TODO implement once requirements are clearer
 def get_on_fit_metrics_agg_fn() -> None:
+    """Aggregate fit metrics fof hierarchical clients."""
     return None
+
+
+def cleanup(path_dict: FolderHierarchy, to_clean: List[str]) -> None:
+    """Cleanup the files in the path_dict."""
+    for file in path_dict["path"].iterdir():
+        if file.is_file():
+            for clean_token in to_clean:
+                if clean_token in file.name:
+                    if file.exists():
+                        file.unlink()
+                        break
+
+    for child in path_dict["children"]:
+        cleanup(child, to_clean)
+
+
+def save_files(
+    path_dict: FolderHierarchy, output_dir: Path, ending: str, to_save: List[str]
+) -> None:
+    """Save the files in the path_dict."""
+    output_dir = output_dir / path_dict["path"].name
+
+    for file in path_dict["path"].iterdir():
+        if file.is_file():
+            for save_token in to_save:
+                if save_token in file.name:
+                    if file.exists():
+                        destination_file = (
+                            output_dir / file.with_stem(f"{file.stem}{ending}").name
+                        )
+                        destination_file.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy(file, destination_file)
+
+    for child in path_dict["children"]:
+        save_files(child, output_dir, ending, to_save)
+
+
+def get_save_files_every_round(
+    path_dict: FolderHierarchy,
+    output_dir: Path,
+    to_save: List[str],
+    save_frequency: int,
+) -> Callable[[int], None]:
+    def save_files_round(round: int) -> None:
+        if round % save_frequency == 0:
+            save_files(path_dict, output_dir, f"_{round}", to_save)
+
+    return save_files_round
+
+
+class FileSystemManager:
+    """A context manager for cleaning up files."""
+
+    def __init__(
+        self,
+        path_dict: FolderHierarchy,
+        output_dir,
+        to_clean: List[str],
+        to_save_once: List[str],
+    ) -> None:
+        self.to_clean = to_clean
+        self.path_dict = path_dict
+        self.output_dir = output_dir
+        self.to_save_once = to_save_once
+        pass
+
+    def __enter__(self):
+        """Initialize the context manager and cleanup."""
+        print(f"Pre-cleaning {self.to_clean}")
+        cleanup(self.path_dict, self.to_clean)
+        os.sync()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        """Cleanup the files."""
+        print(f"Saving {self.to_save_once}")
+        save_files(self.path_dict, self.output_dir, "", self.to_save_once)
+        os.sync()
+        print(f"Post-cleaning {self.to_clean}")
+        cleanup(self.path_dict, self.to_clean)
+        if ray.is_initialized():
+            temp_dir = Path(ray.worker._global_node.get_session_dir_path())  # type: ignore
+            ray.shutdown()
+            shutil.rmtree(temp_dir)
+            print(f"Cleaned up ray temp session: {temp_dir}")
+
+
+def save_histories(
+    histories: List[Tuple[Path, FolderHierarchy, History]],
+    output_directory: Path,
+    type: str,
+) -> None:
+    for folder, _, history in histories:
+        with open(folder / f"history{type}.json", "w", encoding="utf-8") as f:
+            json.dump(history.__dict__, f, ensure_ascii=False)
+        with open(
+            output_directory / f"history{type}_root_{folder.stem}.json",
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(history.__dict__, f, ensure_ascii=False)
+
+
+def plot_histories(
+    plotting_fn: Callable[[History, Path, str], None],
+    histories: List[Tuple[Path, FolderHierarchy, History]],
+    output_directory: Path,
+    type: str,
+) -> None:
+    for folder, _, history in histories:
+        plotting_fn(history, folder, f"history{type}")
+        plotting_fn(history, output_directory, f"history{type}_root_{folder.stem}")
+
+
+def process_histories(
+    plotting_fn: Callable[[History, Path, str], None],
+    histories: List[Tuple[Path, FolderHierarchy, History]],
+    output_directory: Path,
+    type: str,
+) -> None:
+    save_histories(
+        histories=histories,
+        output_directory=output_directory,
+        type="_optimal",
+    )
+    plot_histories(
+        plotting_fn=plotting_fn,
+        histories=histories,
+        output_directory=output_directory,
+        type=type,
+    )

@@ -8,11 +8,13 @@ from flwr.server.strategy.aggregate import aggregate
 def get_fedavg_weighted_node_opt(
     alpha: float,
     aggregate: Callable[[List[Tuple[NDArrays, int]]], NDArrays] = aggregate,
-) -> Callable[[NDArrays, Iterable[Tuple[NDArrays, int, Dict]]], NDArrays]:
+) -> Callable[[NDArrays, Iterable[Tuple[NDArrays, int, Dict]], Dict], NDArrays]:
     """Get the federated averaging strategy for node optimizer."""
 
     def fedavg_weighted_node_opt(
-        parameters: NDArrays, child_parameters: Iterable[Tuple[NDArrays, int, Dict]]
+        parameters: NDArrays,
+        child_parameters: Iterable[Tuple[NDArrays, int, Dict]],
+        config: Dict,
     ) -> NDArrays:
         """Federated averaging strategy for node optimizer.
 
@@ -28,10 +30,12 @@ def get_fedavg_weighted_node_opt(
         parameters : NDArrays
             The updated (global) model parameters.
         """
-        child_results = (
-            (params, num_examples) for (params, num_examples, _) in child_parameters
-        )
-        children_parameters = aggregate(list(child_results))
+        child_results = [
+            (params, num_examples)
+            for (params, num_examples, _) in child_parameters
+            if num_examples > 0
+        ]
+        children_parameters = aggregate(child_results) if child_results else parameters
         return [
             parent_layer * alpha + child_layer * (1 - alpha)
             for parent_layer, child_layer in zip(parameters, children_parameters)

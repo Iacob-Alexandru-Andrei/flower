@@ -4,29 +4,34 @@ Please overwrite `flwr.client.NumPyClient` or `flwr.client.Client` and create a 
 to instantiate your client.
 """
 
+import os
 import random
 from itertools import chain
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Iterable,
-    List,
-    Optional,
-    OrderedDict,
-    Sequence,
-    Tuple,
-)
+from typing import Any, Callable, Dict, Generator, List, Optional, OrderedDict, Tuple
 
 import flwr as fl
 import torch
 import torch.nn as nn
 import utils
-from dataset_preparation import FileHierarchy
-from flwr.common import NDArrays
-from mypy_extensions import NamedArg
+from common_types import (
+    ClientFN,
+    ClientGeneratorList,
+    DataloaderGenerator,
+    DatasetLoader,
+    LoadConfig,
+    NetGenerator,
+    NodeOpt,
+    ParametersLoader,
+    PathLike,
+    RecursiveBuilder,
+    RecursiveBuilderWrapper,
+    RecursiveStructure,
+    TestFunc,
+    TrainFunc,
+)
+from dataset_preparation import FolderHierarchy
+from flwr.common import Code, GetPropertiesIns, GetPropertiesRes, NDArrays, Status
 from state_management import (
     DatasetManager,
     ParameterManager,
@@ -35,22 +40,6 @@ from state_management import (
     process_file,
 )
 from torch.utils.data import DataLoader, Dataset
-from common_types import (
-    DatasetLoader,
-    ParametersLoader,
-    PathLike,
-    NetGenerator,
-    NodeOpt,
-    TrainFunc,
-    TestFunc,
-    DataloaderGenerator,
-    LoadConfig,
-    RecursiveBuilder,
-    RecursiveStructure,
-    ClientGeneratorList,
-    ClientFN,
-    RecursiveBuilderWrapper,
-)
 from utils import extract_file_from_files
 
 
@@ -95,9 +84,12 @@ class RecursiveClient(fl.client.NumPyClient):
         self.recursive_builder = recursive_builder
         self.client_fn = client_fn
 
-    def get_properties(self, config: Dict) -> Dict:
+    def get_properties(self, config: GetPropertiesIns) -> GetPropertiesRes:
         """Return the properties of the client."""
-        return {"true_id": self.true_id, "cid": self.cid}
+        return GetPropertiesRes(
+            Status(Code.OK, ""),
+            {"true_id": self.true_id, "cid": self.cid},  # type: ignore
+        )
 
     def fit(
         self,
@@ -130,7 +122,9 @@ class RecursiveClient(fl.client.NumPyClient):
         client_parameters = parameter_generator(config["parameter_config"])
         if client_parameters is None:
             client_parameters = parameters
-        client_parameters = self.node_opt(client_parameters, [(parameters, 1, {})])
+        client_parameters = self.node_opt(
+            client_parameters, [(parameters, 1, {})], config
+        )
         total_examples: int = 0
         for _i in range(config["client_config"]["num_rounds"]):
             children_results: List[Tuple[int, Dict]] = []
@@ -150,6 +144,10 @@ class RecursiveClient(fl.client.NumPyClient):
                         client_parameters,
                         selected_children,
                     ),
+                    config,
+                )
+                total_examples += sum(
+                    (num_examples for num_examples, _ in children_results)
                 )
 
             if config["client_config"]["train_chain"]:
@@ -161,10 +159,8 @@ class RecursiveClient(fl.client.NumPyClient):
                     client_parameters,
                     config,
                 )
-                total_examples += (
-                    sum((num_examples for num_examples, _ in children_results))
-                    + train_examples
-                )
+                total_examples += train_examples
+
                 results["train_chain_results"].append((train_examples, train_metrics))
 
             if config["client_config"]["train_proxy"]:
@@ -207,7 +203,7 @@ class RecursiveClient(fl.client.NumPyClient):
             test_proxy_dataset_generator,
             test_chain_dataset_generator,
             children_generator_list,
-            recursive_step,
+            _recursive_step,
         ) = recursive_structure
         client_parameters = parameter_generator(config["parameter_config"])
 
@@ -254,8 +250,6 @@ class RecursiveClient(fl.client.NumPyClient):
             else {}
             for i in range(1)
         ]
-
-        recursive_step((client_parameters, config), final=True)  # type: ignore
 
         return (
             loss,
@@ -343,13 +337,16 @@ def process_children_and_accumulate_metrics(
 
 
 def get_recursive_builder(
-    path_dict: FileHierarchy,
+    root: Path,
+    path_dict: FolderHierarchy,
     load_dataset_file: DatasetLoader,
     dataset_manager: DatasetManager,
     load_parameters_file: ParametersLoader,
     parameter_manager: ParameterManager,
     on_fit_config_fn: LoadConfig,
     on_evaluate_config_fn: LoadConfig,
+    parameters_file_name: str,
+    parameters_ext: str = ".pt",
 ) -> RecursiveBuilder:
     """Generate a recursive builder for a given file hierarchy.
 
@@ -366,7 +363,7 @@ def get_recursive_builder(
         file_type: str = "test" if test else "train"
 
         dataset_file: Optional[Path] = extract_file_from_files(
-            path_dict["files"], file_type
+            path_dict["path"], file_type
         )
 
         def dataset_generator(_config) -> Optional[Dataset]:
@@ -377,7 +374,7 @@ def get_recursive_builder(
             )
 
         chain_dataset_file: Optional[Path] = extract_file_from_files(
-            path_dict["files"], f"{file_type}_chain"
+            path_dict["path"], f"{file_type}_chain"
         )
 
         def chain_dataset_generator(_config: Dict) -> Optional[Dataset]:
@@ -390,7 +387,7 @@ def get_recursive_builder(
             )
 
         parameter_file: Optional[Path] = extract_file_from_files(
-            path_dict["files"], "parameters"
+            path_dict["path"], parameters_file_name
         )
 
         def parameter_generator(_config: Dict) -> Optional[NDArrays]:
@@ -401,13 +398,14 @@ def get_recursive_builder(
             )
 
         def get_child_generator(
-            child_path_dict: FileHierarchy,
+            child_path_dict: FolderHierarchy,
         ) -> Callable[[], fl.client.NumPyClient]:
             return lambda: client_fn(
                 str(child_path_dict["path"]),
                 child_path_dict["path"],
                 current_client,
                 get_recursive_builder(
+                    root=root,
                     path_dict=child_path_dict,
                     load_dataset_file=load_dataset_file,
                     dataset_manager=dataset_manager,
@@ -415,6 +413,8 @@ def get_recursive_builder(
                     parameter_manager=parameter_manager,
                     on_fit_config_fn=on_fit_config_fn,
                     on_evaluate_config_fn=on_evaluate_config_fn,
+                    parameters_file_name=parameters_file_name,
+                    parameters_ext=parameters_ext,
                 ),
             )
 
@@ -431,48 +431,48 @@ def get_recursive_builder(
             nonlocal round
             round += 1
 
-            if chain_dataset_file is not None:
-                dataset_manager.unload_chain_dataset(chain_dataset_file)
-
             if final:
-                children_dataset_files: Generator[Optional[Path], None, None] = (
-                    file
-                    for file in (
-                        extract_file_from_files(child_dict["files"], file_type)
-                        for child_dict in path_dict["children"]
-                    )
-                    if file is not None
+                parameters_save_name = (
+                    path_dict["path"] / f"{parameters_file_name}{parameters_ext}"
+                    if parameter_file is None
+                    else parameter_file
                 )
 
-                children_chain_dataset_files: Generator[Optional[Path], None, None] = (
-                    file
-                    for file in (
-                        extract_file_from_files(
-                            child_dict["files"], f"{file_type}_chain"
+                parameter_manager.set_parameters(parameters_save_name, state[0])
+                # The root client will die
+                if root == path_dict["path"]:
+                    parameter_manager.cleanup()
+                else:
+                    if chain_dataset_file is not None:
+                        dataset_manager.unload_chain_dataset(chain_dataset_file)
+
+                    children_dataset_files: Generator[Optional[Path], None, None] = (
+                        file
+                        for file in (
+                            extract_file_from_files(child_dict["path"], file_type)
+                            for child_dict in path_dict["children"]
                         )
-                        for child_dict in path_dict["children"]
+                        if file is not None
                     )
-                    if file is not None
-                )
 
-                dataset_manager.unload_children_datasets(
-                    chain(children_chain_dataset_files, children_dataset_files)
-                )
-
-                children_parameter_files: Generator[Optional[Path], None, None] = (
-                    file
-                    for file in (
-                        extract_file_from_files(child_dict["files"], "parameters")
-                        for child_dict in path_dict["children"]
+                    children_chain_dataset_files: Generator[
+                        Optional[Path], None, None
+                    ] = (
+                        file
+                        for file in (
+                            extract_file_from_files(
+                                child_dict["path"], f"{file_type}_chain"
+                            )
+                            for child_dict in path_dict["children"]
+                        )
+                        if file is not None
                     )
-                    if file is not None
-                )
 
-                parameter_manager.unload_children_parameters(children_parameter_files)
-                parameter_manager.save_parameters(
-                    path_dict["path"] / "parameters.npz", state[0]
-                )
-                round = 0
+                    dataset_manager.unload_children_datasets(
+                        chain(children_chain_dataset_files, children_dataset_files)
+                    )
+
+                    round = 0
 
         return (
             parameter_generator,
@@ -522,4 +522,5 @@ def get_client_fn(
 
 
 def get_recursive_builder_wrapper() -> RecursiveBuilderWrapper:
+    """Get a recursive builder wrapper."""
     return get_recursive_builder

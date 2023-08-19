@@ -8,17 +8,19 @@ block) that this file should be executed first.
 """
 import csv
 import json
+from logging import config
+import os
 import tarfile
 from collections import defaultdict
+from copy import deepcopy
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict
-from cerberus.validator import BareValidator, Validator, schema_registry
-from common_types import FileHierarchy, ClientFileHierarchy, ConfigFileHierarchy
-from config_schema import get_recursive_client_schema
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import gdown
-from regex import B
-
+from cerberus.validator import BareValidator, Validator, schema_registry
+from common_types import ClientFolderHierarchy, ConfigFolderHierarchy, FolderHierarchy
+from omegaconf import DictConfig, OmegaConf
 
 # @hydra.main(config_path="conf", config_name="base", version_base=None)
 # def download_and_preprocess(cfg: DictConfig) -> None:
@@ -58,45 +60,73 @@ def download_FEMNIST(dataset_dir: Path = Path("data/femnist")) -> None:
     print(f"Dataset extracted in {dataset_dir}")
 
 
-# Any is used to represent "FilehHierarchy" because it is a recursive type
-# and MyPy does not have proper support for recursive types.
+def get_parameter_convertor(
+    convertors: Iterable[Tuple[Any, Callable]]
+) -> Callable[[Callable], Callable]:
+    """Get a decorator that converts parameters to the right type."""
+
+    def convert(param: Any) -> bool:
+        for param_type, convertor in convertors:
+            if isinstance(param, param_type):
+                return convertor(param)
+        return param
+
+    def convert_params(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            new_args = []
+            new_kwargs = {}
+            for arg in args:
+                new_args.append(convert(arg))
+            for kwarg_name, kwarg_value in kwargs.items():
+                new_kwargs[kwarg_name] = convert(kwarg_value)
+            return func(*new_args, **new_kwargs)
+
+        return wrapper
+
+    return convert_params
 
 
-def get_wrapped_file_hierarchy(path: str) -> FileHierarchy:
-    return get_file_hierarchy(Path(path))
+pathify_params = get_parameter_convertor([(str, Path)])
 
 
-def get_file_hierarchy(
+@pathify_params
+def get_folder_hierarchy(
     path: Path,
     parent_path: Optional[Path] = None,
-    parent: Optional[FileHierarchy] = None,
-) -> FileHierarchy:
+    parent: Optional[FolderHierarchy] = None,
+) -> FolderHierarchy:
     """Build a dictionary representation of the file system."""
     # Schema of the path_dict
-    path_dict: FileHierarchy = {
-        "parent": parent,
-        "parent_path": parent_path,
-        "path": path,
-        "files": [],
-        "children": [],
-    }
-    # Build the tree
 
-    for _, child_path in enumerate(path.iterdir()):
-        if child_path.is_file():
-            if not child_path.name.startswith("_") and not child_path.name.startswith(
-                "."
-            ):
-                path_dict["files"].append(child_path)
-        else:
-            path_dict["children"].append(
-                get_file_hierarchy(
-                    child_path,
-                    parent_path,
-                    path_dict,
+    def rec_get_folder_hierarchy(
+        root: Path,
+        path: Path,
+        parent_path: Optional[Path] = None,
+        parent: Optional[FolderHierarchy] = None,
+    ) -> FolderHierarchy:
+        path_dict: FolderHierarchy = {
+            "root": root,
+            "parent": parent,
+            "parent_path": parent_path,
+            "path": path,
+            "children": [],
+        }
+        # Build the tree
+
+        for _, child_path in enumerate(path.iterdir()):
+            if child_path.is_dir():
+                path_dict["children"].append(
+                    rec_get_folder_hierarchy(
+                        root,
+                        child_path,
+                        parent_path,
+                        path_dict,
+                    )
                 )
-            )
-    return path_dict
+        return path_dict
+
+    return rec_get_folder_hierarchy(path, path, parent_path, parent)
 
 
 def extract_child_mapping(root: Path) -> Dict[str, Path]:
@@ -112,7 +142,7 @@ def extract_child_mapping(root: Path) -> Dict[str, Path]:
     Dict[str, Path]
         A mapping from child names to paths.
     """
-    path_dict = get_file_hierarchy(root)
+    path_dict = get_folder_hierarchy(root)
     mapping: Dict[str, Path] = {}
     for child in path_dict["children"]:
         mapping[f"r_{child['path'].name}"] = child["path"]
@@ -132,7 +162,7 @@ schema_registry.add(
 
 
 def child_map_to_file_hierarchy(
-    logical_mapping: ClientFileHierarchy, in_root: Path, out_root: Path
+    logical_mapping: ClientFolderHierarchy, in_root: Path, out_root: Path
 ) -> None:
     """Create a file hierarchy based on a logical mapping.
 
@@ -153,12 +183,14 @@ def child_map_to_file_hierarchy(
     child_mapping = extract_child_mapping(in_root)
 
     def rec_child_map_to_file_hierarchy(
-        client_file_hierarchy: ClientFileHierarchy,
+        client_file_hierarchy: ClientFolderHierarchy,
         parent_path: Path,
     ) -> Dict[str, Path]:
         nonlocal child_mapping
 
         name = client_file_hierarchy["name"]
+
+        is_base_case_client = name.startswith("r_")
         children = client_file_hierarchy["children"]
 
         chain_files: Dict[str, List[Path]] = defaultdict(list)
@@ -166,12 +198,12 @@ def child_map_to_file_hierarchy(
         cur_path = parent_path / name
         cur_path.mkdir(parents=True, exist_ok=True)
 
-        if name.startswith("r_"):
+        if is_base_case_client:
             client_directory = child_mapping[name]
             for path in client_directory.iterdir():
                 if path.is_file():
                     if not path.name.startswith("_") and not path.name.startswith("."):
-                        chain_files[f"{path.stem}_base"].append(path)
+                        chain_files[f"{path.stem}"].append(path)
 
         for child in children:
             child_chain_files = rec_child_map_to_file_hierarchy(
@@ -209,11 +241,12 @@ schema_registry.add(
 )
 
 
+@get_parameter_convertor([(str, Path), (DictConfig, OmegaConf.to_container)])
 def config_map_to_file_hierarchy(
-    logical_mapping: ConfigFileHierarchy,
+    logical_mapping: ConfigFolderHierarchy,
     out_root: Path,
-    train_config_schema: Dict[str, Any],
-    test_config_schema: Dict[str, Any],
+    train_schema: Dict[str, Any],
+    test_schema: Dict[str, Any],
 ) -> None:
     """Create a file hierarchy based on a logical mapping.
 
@@ -228,29 +261,26 @@ def config_map_to_file_hierarchy(
     validator: BareValidator = Validator(config_file_hierarchy_schema)  # type: ignore
 
     if not validator.validate(logical_mapping):
-        raise ValueError(
-            f"Invalid config hierarchy: {validator.errors}, {logical_mapping}"
-        )
+        raise ValueError(f"Invalid hierarchy: {validator.errors}, {logical_mapping}")
 
-    train_config_validator: BareValidaVator = Validator(train_config_schema)  # type: ignore
-    test_config_validator: BareValidaVator = Validator(test_config_schema)  # type: ignore
+    train_validator: BareValidator = Validator(train_schema)  # type: ignore
+    test_validator: BareValidator = Validator(test_schema)  # type: ignore
 
     def rec_config_map_to_file_hierarchy(
-        config_file_hierarchy: ConfigFileHierarchy,
+        config_file_hierarchy: ConfigFolderHierarchy,
         cur_path: Path,
     ) -> None:
         on_fit_config = config_file_hierarchy["on_fit_config"]
-
-        if not train_config_validator.validate(on_fit_config):
+        if not train_validator.validate(on_fit_config):
             raise ValueError(
-                f"Invalid config: {train_config_validator.errors}, {on_fit_config}"
+                f"Invalid config: {train_validator.errors}, {on_fit_config}"
             )
 
         on_evaluate_config = config_file_hierarchy["on_evaluate_config"]
 
-        if not test_config_validator.validate(on_evaluate_config):
+        if not test_validator.validate(on_evaluate_config):
             raise ValueError(
-                f"Invalid config: {train_config_validator.errors}, {on_evaluate_config}"
+                f"Invalid config: {train_validator.errors}, {on_evaluate_config}"
             )
 
         with open(cur_path / "on_fit_config.json", "w") as f:
@@ -265,20 +295,8 @@ def config_map_to_file_hierarchy(
             rec_config_map_to_file_hierarchy(child_config, folder)
 
     rec_config_map_to_file_hierarchy(logical_mapping, out_root)
-
-
-def get_uniform_configs(
-    path_dict: FileHierarchy, on_fit_config: Dict, on_evaluate_config: Dict
-) -> ConfigFileHierarchy:
-    """Get a uniform config hierarchy."""
-    return {
-        "on_fit_config": on_fit_config,
-        "on_evaluate_config": on_evaluate_config,
-        "children": [
-            get_uniform_configs(child, on_fit_config, on_evaluate_config)
-            for child in path_dict["children"]
-        ],
-    }
+    os.sync()
+    return None
 
 
 default_FEMNIST_recursive_fit_config = {
@@ -335,6 +353,35 @@ default_FEMNIST_recursive_evaluate_config = {
 }
 
 
+def get_uniform_configs_wrapped() -> Callable[[FolderHierarchy], ConfigFolderHierarchy]:
+    """Get a uniform config hierarchy."""
+    return lambda path_dict: get_uniform_configs(path_dict)
+
+
+def get_uniform_configs(
+    path_dict: FolderHierarchy,
+    on_fit_config: Dict = default_FEMNIST_recursive_fit_config,
+    on_evaluate_config: Dict = default_FEMNIST_recursive_evaluate_config,
+) -> ConfigFolderHierarchy:
+    """Get a uniform config hierarchy."""
+    new_fit_config = deepcopy(on_fit_config)
+    new_evaluate_config = deepcopy(on_evaluate_config)
+
+    if path_dict["path"].name.startswith("r_"):
+        new_fit_config["rounds"][0]["client_config"]["train_chain"] = True
+
+    return {
+        "on_fit_config": new_fit_config,
+        "on_evaluate_config": new_evaluate_config,
+        "children": [
+            get_uniform_configs(
+                child, on_fit_config, on_evaluate_config
+            )  # type: ignore
+            for child in path_dict["children"]
+        ],
+    }
+
+
 if __name__ == "__main__":
     src_folder = Path(
         "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/fed_natural"
@@ -389,20 +436,6 @@ if __name__ == "__main__":
         },
         src_folder,
         out_folder,
-    )
-
-    path_dict = get_file_hierarchy(out_folder)
-    uniform_config_map = get_uniform_configs(
-        path_dict,
-        default_FEMNIST_recursive_fit_config,
-        default_FEMNIST_recursive_evaluate_config,
-    )
-
-    train_config_schema = get_recursive_client_schema(False)
-    test_config_schema = get_recursive_client_schema(True)
-
-    config_map_to_file_hierarchy(
-        uniform_config_map, out_folder, train_config_schema, test_config_schema
     )
 
     # download_and_preprocess()

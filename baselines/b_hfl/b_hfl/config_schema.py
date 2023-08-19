@@ -1,14 +1,5 @@
-from typing import Any, TypedDict
-from typing import Dict
-
-
-class BaseConfig(TypedDict):
-    client_config: Dict
-    dataloader_config: Dict
-    parameter_config: Dict
-    net_config: Dict
-    run_config: Dict
-
+"""Cerberus Config schema for the FEMNIST dataset."""
+from typing import Any, Dict
 
 client_train_schema_recursive: Dict[str, Any] = {
     "num_rounds": {"type": "integer", "required": True},
@@ -31,6 +22,7 @@ dataloader_schema: Dict[str, Any] = {
     "shuffle": {"type": "boolean", "required": True},
     "test": {"type": "boolean", "required": True},
 }
+
 
 net_config_schema: Dict[str, Any] = {"type": "dict", "nullable": True}
 
@@ -119,7 +111,7 @@ recursive_client_FEMNIST_test_schema: Dict[str, Any] = {
 }
 
 
-def get_recursive_client_schema(test: bool) -> Dict[str, Any]:
+def get_recursive_FEMNIST_client_schema(test: bool) -> Dict[str, Any]:
     """Get the recursive client schema for a given config name."""
     if not test:
         return recursive_client_FEMNIST_train_schema

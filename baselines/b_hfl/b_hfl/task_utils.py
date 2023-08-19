@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, Iterator, Tuple
 
 import numpy as np
 import torch
-from common_types import TrainFunc, OptimizerGenerator
+from common_types import OptimizerGenerator, TrainFunc
 from flwr.common.typing import NDArrays
 from PIL.Image import Image as ImageType
 from torch import nn

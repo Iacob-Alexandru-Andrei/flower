@@ -1,3 +1,5 @@
+num_rounds: 10
+
 num_clients_per_round: 2
 num_total_clients: 2
 num_evaluate_clients_per_round: 0
@@ -18,10 +20,13 @@ get_initial_parameters:
   _target_: "utils.get_initial_parameters"
 
 get_fed_eval_fn:
-  _target_: "utils.get_fed_eval_fn"
+  _target_: "run_simulations.get_fed_eval_fn"
 
 get_on_fit_metrics_agg_fn:
   _target_: "utils.get_on_fit_metrics_agg_fn"
 
 get_on_evaluate_metrics_agg_fn:
   _target_: "utils.get_on_fit_metrics_agg_fn"
+
+plot_results:
+  _target_: "utils.plot_metric_from_history"

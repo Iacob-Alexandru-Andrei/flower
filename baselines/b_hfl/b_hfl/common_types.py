@@ -1,3 +1,4 @@
+"""Common types used throughout the project."""
 from pathlib import Path
 from typing import (
     Any,
@@ -12,15 +13,14 @@ from typing import (
     TypedDict,
     Union,
 )
+
 import flwr as fl
+import torch
 from flwr.common import NDArrays
 from mypy_extensions import NamedArg
-import torch
-from torch.utils.data import DataLoader, Dataset
-from torch import nn
-
 from state_management import DatasetManager, ParameterManager
-
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
 PathLike = Union[str, Path]
 
@@ -62,7 +62,7 @@ RecursiveBuilder = Callable[
 NetGenerator = Callable[[Dict], nn.Module]
 
 
-NodeOpt = Callable[[NDArrays, Iterable[Tuple[NDArrays, int, Dict]]], NDArrays]
+NodeOpt = Callable[[NDArrays, Iterable[Tuple[NDArrays, int, Dict]], Dict], NDArrays]
 
 
 OptimizerGenerator = Callable[
@@ -79,24 +79,24 @@ DataloaderGenerator = Callable[[Optional[Dataset], Dict], Optional[DataLoader]]
 LoadConfig = Callable[[int, Path], Dict]
 
 
-class FileHierarchy(TypedDict):
+class FolderHierarchy(TypedDict):
     """Dictionary representation of the file system."""
 
+    root: Path
     parent: Optional[Any]
     parent_path: Optional[Path]
     path: Path
-    files: List[Path]
     children: List[Any]
 
 
-class ClientFileHierarchy(TypedDict):
+class ClientFolderHierarchy(TypedDict):
     """A dictionary, filesyste-based representation of the client hieararchy."""
 
     name: str
     children: List[Any]
 
 
-class ConfigFileHierarchy(TypedDict):
+class ConfigFolderHierarchy(TypedDict):
     """A dictionary, filesyste-based representation of the client hieararchy."""
 
     on_fit_config: Dict
@@ -106,13 +106,16 @@ class ConfigFileHierarchy(TypedDict):
 
 RecursiveBuilderWrapper = Callable[
     [
-        FileHierarchy,
+        Path,
+        FolderHierarchy,
         DatasetLoader,
         DatasetManager,
         ParametersLoader,
         ParameterManager,
         LoadConfig,
         LoadConfig,
+        str,
+        str,
     ],
     RecursiveBuilder,
 ]
