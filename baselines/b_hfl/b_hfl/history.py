@@ -19,6 +19,7 @@ from functools import reduce
 from typing import Dict, List, Tuple
 
 from flwr.common.typing import Scalar
+import wandb
 
 
 class History:
@@ -37,6 +38,7 @@ class History:
 
     def add_loss_centralized(self, server_round: int, loss: float) -> None:
         """Add one loss entry (from centralized evaluation)."""
+        wandb.log({"centralised_loss": loss}, step=server_round)
         self.losses_centralized.append((server_round, loss))
 
     def add_metrics_distributed_fit(
@@ -49,6 +51,7 @@ class History:
             if key not in self.metrics_distributed_fit:
                 self.metrics_distributed_fit[key] = []
             self.metrics_distributed_fit[key].append((server_round, metrics[key]))
+            wandb.log({key: metrics[key]}, step=server_round)
 
     def add_metrics_distributed(
         self, server_round: int, metrics: Dict[str, Scalar]
@@ -60,6 +63,7 @@ class History:
             if key not in self.metrics_distributed:
                 self.metrics_distributed[key] = []
             self.metrics_distributed[key].append((server_round, metrics[key]))
+            wandb.log({key: metrics[key]}, step=server_round)
 
     def add_metrics_centralized(
         self, server_round: int, metrics: Dict[str, Scalar]
@@ -71,6 +75,7 @@ class History:
             if key not in self.metrics_centralized:
                 self.metrics_centralized[key] = []
             self.metrics_centralized[key].append((server_round, metrics[key]))
+            wandb.log({key: metrics[key]}, step=server_round)
 
     def __repr__(self) -> str:
         """Create a representation of History.

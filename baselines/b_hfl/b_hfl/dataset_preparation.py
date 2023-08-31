@@ -8,19 +8,23 @@ block) that this file should be executed first.
 """
 import csv
 import json
-from logging import config
 import os
 import tarfile
 from collections import defaultdict
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
 import gdown
-from cerberus.validator import BareValidator, Validator, schema_registry
-from common_types import ClientFolderHierarchy, ConfigFolderHierarchy, FolderHierarchy
+from config_schema import RecClientTrainConf
+from file_system_schema import (
+    ClientFolderHierarchy,
+    ConfigFolderHierarchy,
+    FolderHierarchy,
+)
 from omegaconf import DictConfig, OmegaConf
+from pydantic import BaseModel
 
 # @hydra.main(config_path="conf", config_name="base", version_base=None)
 # def download_and_preprocess(cfg: DictConfig) -> None:
@@ -45,9 +49,9 @@ def download_FEMNIST(dataset_dir: Path = Path("data/femnist")) -> None:
     #  Download compressed dataset
     data_file = dataset_dir / "femnist.tar.gz"
     if not data_file.exists():
-        id = "1-CI6-QoEmGiInV23-n_l6Yd8QGWerw8-"
+        identifier = "1-CI6-QoEmGiInV23-n_l6Yd8QGWerw8-"
         gdown.download(
-            f"https://drive.google.com/uc?export=download&confirm=pbef&id={id}",
+            f"https://drive.google.com/uc?export=download&confirm=pbef&id={identifier}",
             str(dataset_dir / "femnist.tar.gz"),
         )
 
@@ -105,18 +109,20 @@ def get_folder_hierarchy(
         parent_path: Optional[Path] = None,
         parent: Optional[FolderHierarchy] = None,
     ) -> FolderHierarchy:
-        path_dict: FolderHierarchy = {
-            "root": root,
-            "parent": parent,
-            "parent_path": parent_path,
-            "path": path,
-            "children": [],
-        }
+        path_dict: FolderHierarchy = FolderHierarchy(
+            **{
+                "root": root,
+                "parent": parent,
+                "parent_path": parent_path,
+                "path": path,
+                "children": [],
+            }
+        )
         # Build the tree
 
         for _, child_path in enumerate(path.iterdir()):
             if child_path.is_dir():
-                path_dict["children"].append(
+                path_dict.children.append(
                     rec_get_folder_hierarchy(
                         root,
                         child_path,
@@ -144,21 +150,9 @@ def extract_child_mapping(root: Path) -> Dict[str, Path]:
     """
     path_dict = get_folder_hierarchy(root)
     mapping: Dict[str, Path] = {}
-    for child in path_dict["children"]:
-        mapping[f"r_{child['path'].name}"] = child["path"]
+    for child in path_dict.children:
+        mapping[f"r_{child['path'].name}"] = child.path
     return mapping
-
-
-schema_registry.add(
-    "client_file_hierarchy_schema",
-    {
-        "name": {"type": "string", "required": True},
-        "children": {
-            "type": "list",
-            "schema": {"type": "dict", "schema": "client_file_hierarchy_schema"},
-        },
-    },
-)
 
 
 def child_map_to_file_hierarchy(
@@ -173,13 +167,6 @@ def child_map_to_file_hierarchy(
     root : Path
         The root directory where the file hierarchy will be created.
     """
-    client_file_hierarchy_schema = schema_registry.get("client_file_hierarchy_schema")
-
-    validator: BareValidator = Validator(client_file_hierarchy_schema)  # type: ignore
-
-    if not validator.validate(logical_mapping):
-        raise ValueError(f"Invalid client hierarchy: {validator.errors}")
-
     child_mapping = extract_child_mapping(in_root)
 
     def rec_child_map_to_file_hierarchy(
@@ -188,10 +175,10 @@ def child_map_to_file_hierarchy(
     ) -> Dict[str, Path]:
         nonlocal child_mapping
 
-        name = client_file_hierarchy["name"]
+        name = client_file_hierarchy.name
 
         is_base_case_client = name.startswith("r_")
-        children = client_file_hierarchy["children"]
+        children = client_file_hierarchy.children
 
         chain_files: Dict[str, List[Path]] = defaultdict(list)
 
@@ -228,25 +215,9 @@ def child_map_to_file_hierarchy(
     rec_child_map_to_file_hierarchy(logical_mapping, out_root)
 
 
-schema_registry.add(
-    "config_file_hierarchy_schema",
-    {
-        "on_fit_config": {"type": "dict", "required": True},
-        "on_evaluate_config": {"type": "dict", "required": True},
-        "children": {
-            "type": "list",
-            "schema": {"type": "dict", "schema": "config_file_hierarchy_schema"},
-        },
-    },
-)
-
-
 @get_parameter_convertor([(str, Path), (DictConfig, OmegaConf.to_container)])
 def config_map_to_file_hierarchy(
     logical_mapping: ConfigFolderHierarchy,
-    out_root: Path,
-    train_schema: Dict[str, Any],
-    test_schema: Dict[str, Any],
 ) -> None:
     """Create a file hierarchy based on a logical mapping.
 
@@ -257,129 +228,133 @@ def config_map_to_file_hierarchy(
     root : Path
         The root directory where the file hierarchy will be created.
     """
-    config_file_hierarchy_schema = schema_registry.get("config_file_hierarchy_schema")
-    validator: BareValidator = Validator(config_file_hierarchy_schema)  # type: ignore
-
-    if not validator.validate(logical_mapping):
-        raise ValueError(f"Invalid hierarchy: {validator.errors}, {logical_mapping}")
-
-    train_validator: BareValidator = Validator(train_schema)  # type: ignore
-    test_validator: BareValidator = Validator(test_schema)  # type: ignore
 
     def rec_config_map_to_file_hierarchy(
-        config_file_hierarchy: ConfigFolderHierarchy,
-        cur_path: Path,
+        config_folder_hierarchy: ConfigFolderHierarchy,
     ) -> None:
-        on_fit_config = config_file_hierarchy["on_fit_config"]
-        if not train_validator.validate(on_fit_config):
-            raise ValueError(
-                f"Invalid config: {train_validator.errors}, {on_fit_config}"
-            )
+        on_fit_configs = [
+            on_fit_config.json()
+            for on_fit_config in config_folder_hierarchy.on_fit_configs
+        ]
 
-        on_evaluate_config = config_file_hierarchy["on_evaluate_config"]
+        on_evaluate_configs = [
+            on_evaluate_config.json()
+            for on_evaluate_config in config_folder_hierarchy.on_evaluate_configs
+        ]
+        with open(config_folder_hierarchy.path / "on_fit_config.json", "w") as f:
+            json.dump(on_fit_configs, f)
 
-        if not test_validator.validate(on_evaluate_config):
-            raise ValueError(
-                f"Invalid config: {train_validator.errors}, {on_evaluate_config}"
-            )
+        with open(config_folder_hierarchy.path / "on_evaluate_config.json", "w") as f:
+            json.dump(on_evaluate_configs, f)
 
-        with open(cur_path / "on_fit_config.json", "w") as f:
-            json.dump(on_fit_config, f)
+        for child_config in config_folder_hierarchy.children:
+            rec_config_map_to_file_hierarchy(child_config)
 
-        with open(cur_path / "on_evaluate_config.json", "w") as f:
-            json.dump(on_evaluate_config, f)
-
-        folders = (folder for folder in cur_path.iterdir() if folder.is_dir())
-
-        for child_config, folder in zip(config_file_hierarchy["children"], folders):
-            rec_config_map_to_file_hierarchy(child_config, folder)
-
-    rec_config_map_to_file_hierarchy(logical_mapping, out_root)
+    rec_config_map_to_file_hierarchy(logical_mapping)
     os.sync()
     return None
 
 
-default_FEMNIST_recursive_fit_config = {
-    "rounds": [
-        {
-            "client_config": {
-                "num_rounds": 1,
-                "fit_fraction": 1.0,
-                "train_children": True,
-                "train_chain": False,
-                "train_proxy": False,
-            },
-            "dataloader_config": {
-                "batch_size": 8,
-                "num_workers": 2,
-                "shuffle": False,
-                "test": False,
-            },
-            "parameter_config": {},
-            "net_config": {},
-            "run_config": {
-                "epochs": 1,
-                "client_learning_rate": 0.01,
-                "weight_decay": 0.001,
-            },
-        }
-    ]
-}
+default_FEMNIST_recursive_fit_config = [
+    {
+        "client_config": {
+            "num_rounds": 1,
+            "fit_fraction": 1.0,
+            "train_children": True,
+            "train_chain": False,
+            "train_proxy": False,
+        },
+        "dataloader_config": {
+            "batch_size": 8,
+            "num_workers": 2,
+            "shuffle": False,
+            "test": False,
+        },
+        "parameter_config": {},
+        "net_config": {},
+        "run_config": {
+            "epochs": 1,
+            "client_learning_rate": 0.01,
+            "weight_decay": 0.001,
+        },
+    }
+]
 
-default_FEMNIST_recursive_evaluate_config = {
-    "rounds": [
-        {
-            "client_config": {
-                "eval_fraction": 1.0,
-                "test_children": True,
-                "test_chain": True,
-                "test_proxy": False,
-            },
-            "dataloader_config": {
-                "batch_size": 8,
-                "num_workers": 2,
-                "shuffle": False,
-                "test": False,
-            },
-            "parameter_config": {},
-            "net_config": {},
-            "run_config": {
-                "epochs": 1,
-                "client_learning_rate": 0.01,
-                "weight_decay": 0.001,
-            },
-        }
-    ]
-}
+default_FEMNIST_recursive_evaluate_config = [
+    {
+        "client_config": {
+            "eval_fraction": 1.0,
+            "test_children": True,
+            "test_chain": True,
+            "test_proxy": False,
+        },
+        "dataloader_config": {
+            "batch_size": 8,
+            "num_workers": 2,
+            "shuffle": False,
+            "test": False,
+        },
+        "parameter_config": {},
+        "net_config": {},
+        "run_config": {
+            "epochs": 1,
+            "client_learning_rate": 0.01,
+            "weight_decay": 0.001,
+        },
+    }
+]
 
 
-def get_uniform_configs_wrapped() -> Callable[[FolderHierarchy], ConfigFolderHierarchy]:
+def get_uniform_configs_wrapped(
+    train_config_schema: Type[BaseModel],
+    test_config_schema: Type[BaseModel],
+    on_fit_configs: List[Dict] = default_FEMNIST_recursive_fit_config,
+    on_evaluate_configs: List[Dict] = default_FEMNIST_recursive_evaluate_config,
+) -> Callable[[FolderHierarchy], ConfigFolderHierarchy]:
     """Get a uniform config hierarchy."""
-    return lambda path_dict: get_uniform_configs(path_dict)
+    new_on_fit_configs: List[BaseModel] = [
+        train_config_schema(**on_fit_config) for on_fit_config in on_fit_configs
+    ]
+    new_on_evaluate_configs: List[BaseModel] = [
+        test_config_schema(**on_evaluate_config)
+        for on_evaluate_config in on_evaluate_configs
+    ]
+
+    def wrapped_get_uniform_config(
+        path_dict: FolderHierarchy,
+    ) -> ConfigFolderHierarchy:
+        return get_uniform_configs(
+            path_dict, new_on_fit_configs, new_on_evaluate_configs
+        )
+
+    return lambda path_dict: wrapped_get_uniform_config(path_dict)
 
 
 def get_uniform_configs(
     path_dict: FolderHierarchy,
-    on_fit_config: Dict = default_FEMNIST_recursive_fit_config,
-    on_evaluate_config: Dict = default_FEMNIST_recursive_evaluate_config,
+    on_fit_configs: List[BaseModel],
+    on_evaluate_configs: List[BaseModel],
 ) -> ConfigFolderHierarchy:
     """Get a uniform config hierarchy."""
-    new_fit_config = deepcopy(on_fit_config)
-    new_evaluate_config = deepcopy(on_evaluate_config)
+    new_fit_configs = deepcopy(on_fit_configs)
+    new_evaluate_configs = deepcopy(on_evaluate_configs)
 
-    if path_dict["path"].name.startswith("r_"):
-        new_fit_config["rounds"][0]["client_config"]["train_chain"] = True
-
-    return {
-        "on_fit_config": new_fit_config,
-        "on_evaluate_config": new_evaluate_config,
-        "children": [
-            get_uniform_configs(
-                child, on_fit_config, on_evaluate_config
-            )  # type: ignore
-            for child in path_dict["children"]
-        ],
-    }
+    if path_dict.path.name.startswith("r_"):
+        for new_fit_config in new_fit_configs:
+            if isinstance(new_fit_config, RecClientTrainConf):
+                new_fit_config.client_config.train_chain = True
+    children = [
+        get_uniform_configs(child, on_fit_configs, on_evaluate_configs)  # type: ignore
+        for child in path_dict.children
+    ]
+    return ConfigFolderHierarchy(
+        **{
+            "path": path_dict.path,
+            "on_fit_configs": new_fit_configs,
+            "on_evaluate_configs": new_evaluate_configs,
+            "children": children,
+        }
+    )
 
 
 if __name__ == "__main__":
@@ -391,49 +366,51 @@ if __name__ == "__main__":
     )
 
     child_map_to_file_hierarchy(
-        {
-            "name": "0",
-            "children": [
-                {
-                    "name": "1",
-                    "children": [
-                        {
-                            "name": "3",
-                            "children": [
-                                {"name": "r_0", "children": []},
-                                {"name": "r_1", "children": []},
-                            ],
-                        },
-                        {
-                            "name": "4",
-                            "children": [
-                                {"name": "r_0", "children": []},
-                                {"name": "r_0", "children": []},
-                            ],
-                        },
-                    ],
-                },
-                {
-                    "name": "2",
-                    "children": [
-                        {
-                            "name": "5",
-                            "children": [
-                                {"name": "r_0", "children": []},
-                                {"name": "r_1", "children": []},
-                            ],
-                        },
-                        {
-                            "name": "6",
-                            "children": [
-                                {"name": "r_2", "children": []},
-                                {"name": "r_0", "children": []},
-                            ],
-                        },
-                    ],
-                },
-            ],
-        },
+        ClientFolderHierarchy(
+            **{
+                "name": "0",
+                "children": [
+                    {
+                        "name": "1",
+                        "children": [
+                            {
+                                "name": "3",
+                                "children": [
+                                    {"name": "r_0", "children": []},
+                                    {"name": "r_1", "children": []},
+                                ],
+                            },
+                            {
+                                "name": "4",
+                                "children": [
+                                    {"name": "r_0", "children": []},
+                                    {"name": "r_0", "children": []},
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "name": "2",
+                        "children": [
+                            {
+                                "name": "5",
+                                "children": [
+                                    {"name": "r_0", "children": []},
+                                    {"name": "r_1", "children": []},
+                                ],
+                            },
+                            {
+                                "name": "6",
+                                "children": [
+                                    {"name": "r_2", "children": []},
+                                    {"name": "r_0", "children": []},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ),
         src_folder,
         out_folder,
     )

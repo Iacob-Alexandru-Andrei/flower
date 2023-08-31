@@ -8,13 +8,15 @@ import json
 import os
 import random
 import shutil
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flwr as fl
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+from pydantic import BaseModel
+import ray
 import torch
 from common_types import (
     ClientFN,
@@ -25,11 +27,9 @@ from common_types import (
     TransformType,
 )
 from dataset_preparation import FolderHierarchy
-from flwr.common import Parameters, ndarrays_to_parameters
-from flwr.common.typing import NDArrays
+from flwr.common import Metrics, NDArrays, Parameters, ndarrays_to_parameters
 from server import History
-from torch.utils.data import Dataset, TensorDataset
-import ray
+from torch.utils.data import Dataset
 
 
 def lazy_wrapper(x: Callable) -> Callable[[], Any]:
@@ -46,6 +46,7 @@ def decorate_client_fn_with_recursive_builder(
 ) -> Callable[[ClientFN], Callable[[str], fl.client.Client]]:
     """Decorate a client function with a recursive builder."""
     i: int = 0
+    root: Path = path_dict.path
 
     def client_fn_wrapper(
         client_fn: ClientFN,
@@ -54,11 +55,11 @@ def decorate_client_fn_with_recursive_builder(
             nonlocal i
             nonlocal path_dict
             recursive_builder: RecursiveBuilder = get_client_recursive_builder(
-                path_dict["children"][i]
+                path_dict.children[i]
             )
             i += 1
             return client_fn(
-                cid, path_dict["children"][i]["path"], None, recursive_builder
+                cid, path_dict.children[i].path, root, None, recursive_builder
             )  # type: ignore
 
         return wrap_client_fn
@@ -92,20 +93,6 @@ def decorate_dataset_with_transforms(
         return wrapper_transform
 
     return decorator_transform
-
-
-def load_pandas_file(path: Path) -> Dataset:
-    """Load a pandas dataset from a csv file."""
-    df = pd.read_csv(path)
-    x_tensor = torch.tensor(df["x"].values)
-    y_tensor = torch.tensor(df["y"].values)
-    return TensorDataset(x_tensor, y_tensor)
-
-
-@lazy_wrapper
-def load_tensor_dataset(path: Path) -> Dataset:
-    """Load a torch dataset from a pt file."""
-    return TensorDataset(*torch.load(path))
 
 
 @lazy_wrapper
@@ -176,11 +163,11 @@ def get_config(config_name: str) -> Callable[[int, Path], Dict]:
     def file_on_fit_config_fn(server_round: int, true_id: Path) -> Dict:
         """Return the config for the given round."""
         with open(true_id / f"{config_name}_config.json") as f:
-            configs = json.load(f)
-            if len(configs["rounds"]) <= server_round:
-                return configs["rounds"][-1]
+            configs: List[str] = json.load(f)
+            if len(configs) <= server_round:
+                return dict(json.loads(configs[-1]))
             else:
-                return configs["rounds"][server_round]
+                return dict(json.loads(configs[server_round]))
 
     return file_on_fit_config_fn
 
@@ -205,7 +192,7 @@ def get_initial_parameters(
     on_fit_config_fn: LoadConfig,
 ) -> Parameters:
     """Get the initial parameters for the server."""
-    parameters_file = extract_file_from_files(path_dict["path"], "parameters")
+    parameters_file = extract_file_from_files(path_dict.path, "parameters")
     if parameters_file is not None:
         return ndarrays_to_parameters(load_parameters_file(parameters_file))
     else:
@@ -213,7 +200,7 @@ def get_initial_parameters(
             [
                 val.cpu().numpy()
                 for _, val in net_generator(
-                    on_fit_config_fn(0, path_dict["path"])["net_config"]
+                    on_fit_config_fn(0, path_dict.path)["net_config"]
                 )
                 .state_dict()
                 .items()
@@ -221,15 +208,39 @@ def get_initial_parameters(
         )
 
 
-# TODO implement once requirements are clearer
-def get_on_fit_metrics_agg_fn() -> None:
+@lazy_wrapper
+def get_metrics_agg_fn(metrics_list: List[Tuple[int, Metrics]], sep="::") -> Metrics:
     """Aggregate fit metrics fof hierarchical clients."""
-    return None
+    result: Metrics = {}
+    metrics_dict: Dict = defaultdict(list)
+    root = os.path.commonprefix(
+        [key.split(sep)[0] for _, metric in metrics_list for key in metric.keys()]
+    )[:-1]
+
+    num_examples_array: List[int] = []
+    for num_examples, metrics in metrics_list:
+        for key, value in metrics.items():
+            relative_id, mode, metric = key.split(sep)
+
+            if root == os.path.dirname(relative_id) and "#" not in metric:
+                metrics_dict[f"{mode}{sep}{metric}"].append(value)
+                num_examples_array.append(num_examples)
+
+        result.update(metrics)
+
+    for metric in metrics_dict.keys():
+        result[f"{root}{sep}{metric}#M"] = float(np.mean(metrics_dict[metric]))
+        result[f"{root}{sep}{metric}#WM"] = float(
+            np.average(metrics_dict[metric], weights=num_examples_array)
+        )
+        result[f"{root}{sep}{metric}#S"] = float(np.std(metrics_dict[metric]))
+
+    return result
 
 
 def cleanup(path_dict: FolderHierarchy, to_clean: List[str]) -> None:
     """Cleanup the files in the path_dict."""
-    for file in path_dict["path"].iterdir():
+    for file in path_dict.path.iterdir():
         if file.is_file():
             for clean_token in to_clean:
                 if clean_token in file.name:
@@ -237,7 +248,7 @@ def cleanup(path_dict: FolderHierarchy, to_clean: List[str]) -> None:
                         file.unlink()
                         break
 
-    for child in path_dict["children"]:
+    for child in path_dict.children:
         cleanup(child, to_clean)
 
 
@@ -245,9 +256,9 @@ def save_files(
     path_dict: FolderHierarchy, output_dir: Path, ending: str, to_save: List[str]
 ) -> None:
     """Save the files in the path_dict."""
-    output_dir = output_dir / path_dict["path"].name
+    output_dir = output_dir / path_dict.path.name
 
-    for file in path_dict["path"].iterdir():
+    for file in path_dict.path.iterdir():
         if file.is_file():
             for save_token in to_save:
                 if save_token in file.name:
@@ -258,7 +269,7 @@ def save_files(
                         destination_file.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy(file, destination_file)
 
-    for child in path_dict["children"]:
+    for child in path_dict.children:
         save_files(child, output_dir, ending, to_save)
 
 
@@ -268,6 +279,8 @@ def get_save_files_every_round(
     to_save: List[str],
     save_frequency: int,
 ) -> Callable[[int], None]:
+    """Get a function that saves files every save_frequency rounds."""
+
     def save_files_round(round: int) -> None:
         if round % save_frequency == 0:
             save_files(path_dict, output_dir, f"_{round}", to_save)
@@ -306,7 +319,9 @@ class FileSystemManager:
         print(f"Post-cleaning {self.to_clean}")
         cleanup(self.path_dict, self.to_clean)
         if ray.is_initialized():
-            temp_dir = Path(ray.worker._global_node.get_session_dir_path())  # type: ignore
+            temp_dir = Path(
+                ray.worker._global_node.get_session_dir_path()  # type: ignore
+            )
             ray.shutdown()
             shutil.rmtree(temp_dir)
             print(f"Cleaned up ray temp session: {temp_dir}")
@@ -317,6 +332,10 @@ def save_histories(
     output_directory: Path,
     type: str,
 ) -> None:
+    """Save the histories.
+
+    Saves them both in the client folder and in a flat fashion.
+    """
     for folder, _, history in histories:
         with open(folder / f"history{type}.json", "w", encoding="utf-8") as f:
             json.dump(history.__dict__, f, ensure_ascii=False)
@@ -334,6 +353,10 @@ def plot_histories(
     output_directory: Path,
     type: str,
 ) -> None:
+    """Plot the histories.
+
+    Both in the client folders and in a flat hierarchy.
+    """
     for folder, _, history in histories:
         plotting_fn(history, folder, f"history{type}")
         plotting_fn(history, output_directory, f"history{type}_root_{folder.stem}")
@@ -345,6 +368,10 @@ def process_histories(
     output_directory: Path,
     type: str,
 ) -> None:
+    """Process the histories.
+
+    Save and plot them in the client folders and in a flat fashion.
+    """
     save_histories(
         histories=histories,
         output_directory=output_directory,

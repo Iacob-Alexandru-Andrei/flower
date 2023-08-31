@@ -4,7 +4,6 @@ Please overwrite `flwr.client.NumPyClient` or `flwr.client.Client` and create a 
 to instantiate your client.
 """
 
-import os
 import random
 from itertools import chain
 from pathlib import Path
@@ -23,7 +22,6 @@ from common_types import (
     NetGenerator,
     NodeOpt,
     ParametersLoader,
-    PathLike,
     RecursiveBuilder,
     RecursiveBuilderWrapper,
     RecursiveStructure,
@@ -31,7 +29,15 @@ from common_types import (
     TrainFunc,
 )
 from dataset_preparation import FolderHierarchy
-from flwr.common import Code, GetPropertiesIns, GetPropertiesRes, NDArrays, Status
+from flwr.common import (
+    Code,
+    GetPropertiesIns,
+    GetPropertiesRes,
+    Metrics,
+    MetricsAggregationFn,
+    NDArrays,
+    Status,
+)
 from state_management import (
     DatasetManager,
     ParameterManager,
@@ -53,7 +59,8 @@ class RecursiveClient(fl.client.NumPyClient):
     def __init__(
         self,
         cid: str,
-        true_id: PathLike,
+        true_id: Path,
+        root: Path,
         parent: Optional[fl.client.NumPyClient],
         net_generator: NetGenerator,
         node_opt: NodeOpt,
@@ -62,6 +69,8 @@ class RecursiveClient(fl.client.NumPyClient):
         create_dataloader: DataloaderGenerator,
         recursive_builder: RecursiveBuilder,
         client_fn: ClientFN,
+        fit_metrics_aggregation_fn: MetricsAggregationFn,
+        evaluate_metrics_aggregation_fn: MetricsAggregationFn,
     ) -> None:  # pylint: disable=too-many-arguments,too-many-instance-attributes
         """Initialise the recursive client.
 
@@ -80,9 +89,15 @@ class RecursiveClient(fl.client.NumPyClient):
         self.test_func = test
         self.create_dataloader = create_dataloader
 
+        self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
+
+        self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
+
         # Handles building the hierarchical structure of the clients
         self.recursive_builder = recursive_builder
         self.client_fn = client_fn
+        self.sep = "::"
+        self.root = root
 
     def get_properties(self, config: GetPropertiesIns) -> GetPropertiesRes:
         """Return the properties of the client."""
@@ -95,16 +110,12 @@ class RecursiveClient(fl.client.NumPyClient):
         self,
         parameters: NDArrays,
         config: Dict,
-    ) -> Tuple[NDArrays, int, Dict]:
+    ) -> Tuple[NDArrays, int, Metrics]:
         """Execute the node subtree and fit the node model.
 
         #TODO: Add detailed explanation
         """
-        results: Dict[str, List] = {
-            "children_results": [],
-            "train_results": [],
-            "train_chain_results": [],
-        }
+
         recursive_structure: RecursiveStructure = self.recursive_builder(
             self,
             self.client_fn,
@@ -126,8 +137,14 @@ class RecursiveClient(fl.client.NumPyClient):
             client_parameters, [(parameters, 1, {})], config
         )
         total_examples: int = 0
+        train_chain_examples: int = 0
+        train_proxy_examples: int = 0
+        children_results: List[Tuple[int, Dict]] = []
+        train_proxy_metrics: Dict = {}
+        train_chain_metrics: Dict = {}
         for _i in range(config["client_config"]["num_rounds"]):
-            children_results: List[Tuple[int, Dict]] = []
+            children_results = []
+
             if config["client_config"]["train_children"]:
                 selected_children: List[Tuple[Callable[[], Any], Dict]] = random.sample(
                     children_generator_list,
@@ -150,37 +167,45 @@ class RecursiveClient(fl.client.NumPyClient):
                     (num_examples for num_examples, _ in children_results)
                 )
 
-            if config["client_config"]["train_chain"]:
-                train_examples, train_metrics = self._train(
-                    self.create_dataloader(
-                        train_chain_dataset_generator(config),
-                        config["dataloader_config"] | {"test": False},
-                    ),
-                    client_parameters,
-                    config,
-                )
-                total_examples += train_examples
+            train_chain_examples, train_chain_metrics = self._train(
+                self.create_dataloader(
+                    train_chain_dataset_generator(config),
+                    config["dataloader_config"] | {"test": False},
+                ),
+                client_parameters,
+                config,
+                mode="" if config["client_config"]["train_chain"] else None,
+            )
+            total_examples += train_chain_examples
 
-                results["train_chain_results"].append((train_examples, train_metrics))
-
-            if config["client_config"]["train_proxy"]:
-                train_examples, train_metrics = self._train(
-                    self.create_dataloader(
-                        train_proxy_dataset_generator(config),
-                        config["dataloader_config"] | {"test": False},
-                    ),
-                    client_parameters,
-                    config,
-                )
-                total_examples += train_examples
-
-                results["train_proxy_results"].append((train_examples, train_metrics))
+            train_proxy_examples, train_proxy_metrics = self._train(
+                self.create_dataloader(
+                    train_proxy_dataset_generator(config),
+                    config["dataloader_config"] | {"test": False},
+                ),
+                client_parameters,
+                config,
+                mode="proxy" if config["client_config"]["train_proxy"] else None,
+            )
+            total_examples += train_proxy_examples
 
             client_parameters = self.get_parameters(config)
-
-            results["children_results"].append(children_results)
-
             recursive_step((client_parameters, config), final=False)  # type: ignore
+
+        results: Metrics = {}
+
+        children_results_final_round = self.fit_metrics_aggregation_fn(children_results)
+        results.update(children_results_final_round)
+
+        train_self_metrics_final_round = self.fit_metrics_aggregation_fn(
+            [
+                (train_chain_examples, train_chain_metrics),
+                (train_proxy_examples, train_proxy_metrics),
+            ],
+        )
+        results.update(train_self_metrics_final_round)
+        results.update(train_chain_metrics)
+        results.update(train_proxy_metrics)
 
         recursive_step((client_parameters, config), final=True)  # type: ignore
         return (
@@ -189,7 +214,9 @@ class RecursiveClient(fl.client.NumPyClient):
             results,
         )
 
-    def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
+    def evaluate(
+        self, parameters: NDArrays, config: Dict
+    ) -> Tuple[float, int, Metrics]:
         """Evaluate the node model and lazily evaluate the children models + parent.
 
         #TODO: Add detailed explanation
@@ -224,41 +251,40 @@ class RecursiveClient(fl.client.NumPyClient):
             for child_generator, conf in children_generator_list
         ]
 
-        loss, num_examples, test_metrics = (
-            self._test(
-                self.create_dataloader(
-                    test_chain_dataset_generator(config),
-                    config["dataloader_config"] | {"test": False},
-                ),
-                client_parameters,
-                config,
-            )
-            if config["client_config"]["test_chain"]
-            else (0.0, 0, {})
+        loss, num_examples, test_metrics = self._test(
+            self.create_dataloader(
+                test_chain_dataset_generator(config),
+                config["dataloader_config"] | {"test": False},
+            ),
+            client_parameters,
+            config,
+            mode="chain" if config["client_config"]["test_chain"] else None,
         )
 
-        test_proxy_results = [
-            self._test(
-                self.create_dataloader(
-                    test_proxy_dataset_generator(config),
-                    config["dataloader_config"] | {"test": False},
-                ),
-                client_parameters,
-                config,
-            )
-            if config["client_config"]["test_proxy"]
-            else {}
-            for i in range(1)
-        ]
+        _, proxy_num_examples, proxy_metrics = self._test(
+            self.create_dataloader(
+                test_proxy_dataset_generator(config),
+                config["dataloader_config"] | {"test": False},
+            ),
+            client_parameters,
+            config,
+            mode="proxy" if config["client_config"]["test_proxy"] else None,
+        )
+        results: Metrics = {}
+        children_results_metrics = self.evaluate_metrics_aggregation_fn(
+            [(num_examples, metrics) for _, num_examples, metrics in children_results]
+        )
+        results.update(children_results_metrics)
+
+        test_self_metrics = self.evaluate_metrics_aggregation_fn(
+            [(num_examples, test_metrics), (proxy_num_examples, proxy_metrics)]
+        )
+        results.update(test_self_metrics)
 
         return (
             loss,
             num_examples,
-            {
-                "test_chain_metrics": test_metrics,
-                "test_proxy_results": test_proxy_results,
-                "children_results": children_results,
-            },
+            results,
         )
 
     def get_parameters(self, config: Dict) -> NDArrays:
@@ -284,9 +310,13 @@ class RecursiveClient(fl.client.NumPyClient):
         self.net.load_state_dict(state_dict, strict=True)
 
     def _train(
-        self, train_loader: Optional[DataLoader], parameters: NDArrays, config: Dict
+        self,
+        train_loader: Optional[DataLoader],
+        parameters: NDArrays,
+        config: Dict,
+        mode: Optional[str],
     ) -> Tuple[int, Dict]:
-        if train_loader is not None:
+        if train_loader is not None and mode is not None:
             self.net = (
                 self.net
                 if self.net is not None
@@ -297,16 +327,29 @@ class RecursiveClient(fl.client.NumPyClient):
             self.set_parameters(parameters, config)
             self.net.to(device)
             self.net.train()
-            return self.train_func(
+            num_examples, metrics = self.train_func(
                 self.net, train_loader, config["run_config"] | {"device": device}
+            )
+            relative_id = self.true_id.relative_to(self.root.parent)
+
+            return (
+                num_examples,
+                {
+                    f"{relative_id}{self.sep}{mode}{self.sep}{key}": val
+                    for key, val in metrics.items()
+                },
             )
 
         return 0, {}
 
     def _test(
-        self, test_loader: Optional[DataLoader], parameters: NDArrays, config: Dict
+        self,
+        test_loader: Optional[DataLoader],
+        parameters: NDArrays,
+        config: Dict,
+        mode: Optional[str],
     ) -> Tuple[float, int, Dict]:
-        if test_loader is not None:
+        if test_loader is not None and mode is not None:
             self.net = (
                 self.net
                 if self.net is not None
@@ -317,8 +360,18 @@ class RecursiveClient(fl.client.NumPyClient):
             self.set_parameters(parameters, config)
             self.net.to(device)
             self.net.eval()
-            return self.test_func(
+            loss, num_examples, metrics = self.test_func(
                 self.net, test_loader, config["run_config"] | {"device": device}
+            )
+            relative_id = self.true_id.relative_to(self.root.parent)
+
+            return (
+                loss,
+                num_examples,
+                {
+                    f"{relative_id}{self.sep}{key}{self.sep}{mode}": val
+                    for key, val in metrics.items()
+                },
             )
         else:
             return 0.0, 0, {}
@@ -363,7 +416,7 @@ def get_recursive_builder(
         file_type: str = "test" if test else "train"
 
         dataset_file: Optional[Path] = extract_file_from_files(
-            path_dict["path"], file_type
+            path_dict.path, file_type
         )
 
         def dataset_generator(_config) -> Optional[Dataset]:
@@ -374,7 +427,7 @@ def get_recursive_builder(
             )
 
         chain_dataset_file: Optional[Path] = extract_file_from_files(
-            path_dict["path"], f"{file_type}_chain"
+            path_dict.path, f"{file_type}_chain"
         )
 
         def chain_dataset_generator(_config: Dict) -> Optional[Dataset]:
@@ -387,7 +440,7 @@ def get_recursive_builder(
             )
 
         parameter_file: Optional[Path] = extract_file_from_files(
-            path_dict["path"], parameters_file_name
+            path_dict.path, parameters_file_name
         )
 
         def parameter_generator(_config: Dict) -> Optional[NDArrays]:
@@ -399,10 +452,12 @@ def get_recursive_builder(
 
         def get_child_generator(
             child_path_dict: FolderHierarchy,
+            cid: str,
         ) -> Callable[[], fl.client.NumPyClient]:
             return lambda: client_fn(
-                str(child_path_dict["path"]),
-                child_path_dict["path"],
+                str(child_path_dict.path),
+                child_path_dict.path,
+                root,
                 current_client,
                 get_recursive_builder(
                     root=root,
@@ -421,10 +476,10 @@ def get_recursive_builder(
         config_fn = on_fit_config_fn if not test else on_evaluate_config_fn
         child_generator: ClientGeneratorList = [
             (
-                get_child_generator(child_path_dict),
-                config_fn(round, child_path_dict["path"]),
+                get_child_generator(child_path_dict, str(i)),
+                config_fn(round, child_path_dict.path),
             )
-            for child_path_dict in path_dict["children"]
+            for i, child_path_dict in enumerate(path_dict.children)
         ]
 
         def recursive_step(state: Tuple[NDArrays, Dict], final: bool) -> None:
@@ -433,14 +488,14 @@ def get_recursive_builder(
 
             if final:
                 parameters_save_name = (
-                    path_dict["path"] / f"{parameters_file_name}{parameters_ext}"
+                    path_dict.path / f"{parameters_file_name}{parameters_ext}"
                     if parameter_file is None
                     else parameter_file
                 )
 
                 parameter_manager.set_parameters(parameters_save_name, state[0])
                 # The root client will die
-                if root == path_dict["path"]:
+                if root == path_dict.path:
                     parameter_manager.cleanup()
                 else:
                     if chain_dataset_file is not None:
@@ -449,8 +504,8 @@ def get_recursive_builder(
                     children_dataset_files: Generator[Optional[Path], None, None] = (
                         file
                         for file in (
-                            extract_file_from_files(child_dict["path"], file_type)
-                            for child_dict in path_dict["children"]
+                            extract_file_from_files(child_dict.path, file_type)
+                            for child_dict in path_dict.children
                         )
                         if file is not None
                     )
@@ -461,9 +516,9 @@ def get_recursive_builder(
                         file
                         for file in (
                             extract_file_from_files(
-                                child_dict["path"], f"{file_type}_chain"
+                                child_dict.path, f"{file_type}_chain"
                             )
-                            for child_dict in path_dict["children"]
+                            for child_dict in path_dict.children
                         )
                         if file is not None
                     )
@@ -491,12 +546,15 @@ def get_client_fn(
     train: TrainFunc,
     test: TestFunc,
     create_dataloader: DataloaderGenerator,
+    fit_metrics_aggregation_fn: MetricsAggregationFn,
+    evaluate_metrics_aggregation_fn: MetricsAggregationFn,
 ) -> ClientFN:  # pylint: disable=too-many-arguments
     """Generate a client function with the given methods for the client."""
 
     def client_fn(
         cid: str,
-        true_id: PathLike,
+        true_id: Path,
+        root: Path,
         parent: Optional[fl.client.NumPyClient],
         recursive_builder: RecursiveBuilder,
     ) -> RecursiveClient:
@@ -508,6 +566,7 @@ def get_client_fn(
         return RecursiveClient(
             cid=cid,
             true_id=true_id,
+            root=root,
             parent=parent,
             net_generator=net_generator,
             node_opt=node_opt,
@@ -516,6 +575,8 @@ def get_client_fn(
             create_dataloader=create_dataloader,
             recursive_builder=recursive_builder,
             client_fn=client_fn,
+            fit_metrics_aggregation_fn=fit_metrics_aggregation_fn,
+            evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,
         )
 
     return client_fn

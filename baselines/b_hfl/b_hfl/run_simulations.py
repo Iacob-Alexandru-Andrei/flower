@@ -1,28 +1,35 @@
+"""Run either federated or centralised simulations.
+
+Experiments execute hierarchically based on the folder structure of the data folder.
+"""
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
-from omegaconf import DictConfig
+
 import flwr as fl
-from flwr.common import NDArrays
-from strategy import LoggingFedAvg
+from client_manager import DeterministicClientManager
 from common_types import (
     ClientFN,
-    ConfigFolderHierarchy,
     DataloaderGenerator,
     DatasetLoader,
     DatasetLoaderNoTransforms,
     FolderHierarchy,
+    LoadConfig,
     NetGenerator,
+    NodeOpt,
     ParametersLoader,
     RecursiveBuilder,
-    TrainFunc,
-    TestFunc,
-    NodeOpt,
-    TransformType,
-    ParametersLoader,
-    LoadConfig,
     RecursiveBuilderWrapper,
+    TestFunc,
+    TrainFunc,
+    TransformType,
 )
+from dataset_preparation import ConfigFolderHierarchy
+from flwr.common import NDArrays, Parameters
+from flwr.server import ServerConfig
 from hydra.utils import call, instantiate
+from omegaconf import DictConfig
+from server import History, Server
+from strategy import LoggingFedAvg
 from task_utils import optimizer_generator_decorator
 from utils import (
     decorate_client_fn_with_recursive_builder,
@@ -30,10 +37,6 @@ from utils import (
     get_save_files_every_round,
     seed_everything,
 )
-from server import Server, History
-from client_manager import DeterministicClientManager
-from flwr.server import ServerConfig
-from flwr.common import Parameters
 
 
 def get_fed_eval_fn(
@@ -43,7 +46,13 @@ def get_fed_eval_fn(
     on_evaluate_config_function: LoadConfig,
 ) -> Callable[[int, NDArrays, Dict], Optional[Tuple[float, Dict]]]:
     """Get the federated evaluation function."""
-    client = client_fn(str(root_path), root_path, None, recursive_builder)
+    client = client_fn(
+        str(root_path),
+        root_path,
+        root_path.parent,
+        None,
+        recursive_builder,
+    )
 
     def fed_eval_fn(
         server_round: int, parameters: NDArrays, config: Dict
@@ -59,10 +68,14 @@ def get_fed_eval_fn(
 def unroll_hierarchy(
     x: FolderHierarchy, recursively_train_all: bool
 ) -> List[FolderHierarchy]:
+    """Unroll the hierarchy of the file system.
+
+    For executing clients sequentially.
+    """
     ret = [x]
     if recursively_train_all:
         return ret
-    for child in x["children"]:
+    for child in x.children:
         ret.extend(unroll_hierarchy(child, recursively_train_all))
     return ret
 
@@ -78,6 +91,11 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     ParametersLoader,
     NetGenerator,
 ]:
+    """Build the client function and recursive builder generator.
+
+    They encapsulate all the client logic and state logic this allows evaluation and
+    training outside of a simulation without logic duplication.
+    """
     get_config_mapping: Callable[[FolderHierarchy], ConfigFolderHierarchy] = call(
         cfg.data.get_config_mapping
     )
@@ -87,8 +105,6 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     call(
         cfg.data.create_configs,
         logical_mapping=config_mapping,
-        train_schema=call(cfg.data.get_train_config_schema),  # type: ignore
-        test_schema=call(cfg.data.get_test_config_schema),
     )
 
     net_generator: NetGenerator = call(cfg.client.get_net_generator)
@@ -109,6 +125,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
         train=train,
         test=test,
         create_dataloader=create_dataloader,
+        fit_metrics_aggregation_fn=call(cfg.fed.get_on_fit_metrics_agg_fn),
+        evaluate_metrics_aggregation_fn=call(cfg.fed.get_on_evaluate_metrics_agg_fn),
     )
 
     load_dataset_file_no_transforms: DatasetLoaderNoTransforms = call(
@@ -133,9 +151,11 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     def get_client_recursive_builder_for_parameter_type(
         parameters_file_name: str,
     ) -> Callable[[FolderHierarchy], RecursiveBuilder]:
+        """Get the recursive builder for a given parameter type."""
+
         def get_client_recursive_builder(x: FolderHierarchy) -> RecursiveBuilder:
             return recursive_builder_wrapper(
-                root=x["path"],  # type: ignore
+                root=x.path,  # type: ignore
                 path_dict=x,
                 load_dataset_file=load_dataset_file,
                 dataset_manager=call(cfg.state.get_dataset_manager),
@@ -170,6 +190,8 @@ def get_run_fed_simulation(
     client_output_directory: Path,
     initial_parameters: Parameters,
 ) -> Callable[[FolderHierarchy], History]:
+    """Get the function to run a federated simulation."""
+
     def run_fed_simulation(path_dict: FolderHierarchy) -> History:
         seed_everything(cfg.fed.seed)
 
@@ -189,7 +211,7 @@ def get_run_fed_simulation(
             [int, NDArrays, Dict], Optional[Tuple[float, Dict]]
         ] = call(
             cfg.fed.get_fed_eval_fn,
-            root_path=path_dict["path"],
+            root_path=path_dict.path,
             client_fn=client_fn,
             recursive_builder=root_recursive_builder,
             on_evaluate_config_function=on_evaluate_config_function,
@@ -256,6 +278,10 @@ def run_fed_simulations_recursive(
     initial_parameters: Parameters,
     recursively_fed_all: bool,
 ) -> List[Tuple[Path, FolderHierarchy, History]]:
+    """Run federated simulations recursively.
+
+    Starting with each client in-turn as the root of the simulation.
+    """
     run_fed_simulation_fn: Callable[
         [FolderHierarchy], History
     ] = get_run_fed_simulation(
@@ -272,7 +298,7 @@ def run_fed_simulations_recursive(
 
     for client_dict in unroll_hierarchy(path_dict, recursively_fed_all):
         histories.append(
-            (client_dict["path"], client_dict, run_fed_simulation_fn(client_dict))
+            (client_dict.path, client_dict, run_fed_simulation_fn(client_dict))
         )
 
     return histories
@@ -280,6 +306,7 @@ def run_fed_simulations_recursive(
 
 def get_train_and_eval_optimal(
     client_fn: ClientFN,
+    root: Path,
     get_recursive_builder: Callable[[FolderHierarchy], RecursiveBuilder],
     on_fit_config_function: LoadConfig,
     on_evaluate_config_function: LoadConfig,
@@ -290,12 +317,13 @@ def get_train_and_eval_optimal(
 
     def train_client(path_dict: FolderHierarchy) -> NDArrays:
         client = client_fn(
-            str(path_dict["path"]),
-            path_dict["path"],
+            str(path_dict.path),
+            path_dict.path,
+            root,
             None,
             get_recursive_builder(path_dict),
         )
-        config = on_fit_config_function(0, path_dict["path"])
+        config = on_fit_config_function(0, path_dict.path)
         config["client_config"]["train_chain"] = True
         config["client_config"]["train_proxy"] = False
         config["client_config"]["train_children"] = False
@@ -308,7 +336,7 @@ def get_train_and_eval_optimal(
         trained_parameters = train_client(path_dict)
         seed_everything(seed)
         eval_fn = get_fed_eval_fn(
-            root_path=path_dict["path"],
+            root_path=path_dict.path,
             client_fn=client_fn,
             recursive_builder=get_recursive_builder(path_dict),
             on_evaluate_config_function=on_evaluate_config_function,
@@ -335,8 +363,10 @@ def train_and_evaluate_optimal_models_from_hierarchy(
     seed: int,
     recursively_train_all: bool,
 ) -> List[Tuple[Path, FolderHierarchy, History]]:
+    """Run centralised training with each node in the tree."""
     train_client_fn = get_train_and_eval_optimal(
         client_fn,
+        path_dict.path,
         get_recursive_builder,
         on_fit_config_function,
         on_evaluate_config_function=on_evaluate_config_function,
@@ -346,8 +376,6 @@ def train_and_evaluate_optimal_models_from_hierarchy(
     histories: List[Tuple[Path, FolderHierarchy, History]] = []
 
     for client_dict in unroll_hierarchy(path_dict, recursively_train_all):
-        histories.append(
-            (client_dict["path"], client_dict, train_client_fn(client_dict))
-        )
+        histories.append((client_dict.path, client_dict, train_client_fn(client_dict)))
 
     return histories

@@ -6,7 +6,6 @@ extend or modify the functionality of an existing strategy.
 import os
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-import wandb
 from flwr.common import FitIns, FitRes, GetPropertiesIns, Parameters, Scalar
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy

@@ -128,7 +128,7 @@ def train_FEMNIST(
             total += labels.size(0)
             loss.backward()
             optimizer.step()
-    return total, {"avg_loss": running_loss / total}
+    return total, {"avg_loss_train": running_loss / total}
 
 
 @lazy_wrapper
@@ -164,7 +164,11 @@ def test_FEMNIST(
             correct += (predicted == labels).sum().item()
 
     accuracy = correct / total
-    return loss / total, total, {"accuracy": accuracy}
+    return (
+        loss / total,
+        total,
+        {"accuracy_test": accuracy, "avg_loss_test": loss / total},
+    )
 
 
 def set_model_parameters(net: nn.Module, parameters: NDArrays) -> nn.Module:

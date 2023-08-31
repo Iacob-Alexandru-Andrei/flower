@@ -3,55 +3,27 @@
 It includes processioning the dataset, instantiate strategy, specify how the global
 model is going to be evaluated, etc. At the end, this script saves the results.
 """
-import json
 import os
+import subprocess
+from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Tuple
 
-import flwr as fl
 import hydra
 import wandb
 import yaml
-from client_manager import DeterministicClientManager
-from common_types import (
-    ClientFN,
-    DataloaderGenerator,
-    DatasetLoader,
-    DatasetLoaderNoTransforms,
-    FolderHierarchy,
-    LoadConfig,
-    NetGenerator,
-    NodeOpt,
-    ParametersLoader,
-    RecursiveBuilder,
-    RecursiveBuilderWrapper,
-    TestFunc,
-    TrainFunc,
-    TransformType,
-)
-from dataset_preparation import ConfigFolderHierarchy
-from flwr.common import NDArrays
-from flwr.server import ServerConfig
+from common_types import FolderHierarchy, RecursiveBuilder
+from flwr.common import Parameters, parameters_to_ndarrays
 from hydra.core.hydra_config import HydraConfig
-from hydra.utils import call, instantiate
+from hydra.utils import call
 from omegaconf import DictConfig, OmegaConf
-from server import History, Server
-from strategy import LoggingFedAvg
-from task_utils import optimizer_generator_decorator
-from utils import (
-    FileSystemManager,
-    plot_histories,
-    process_histories,
-    save_histories,
-)
-import subprocess
 from run_simulations import (
     build_hydra_client_fn_and_recursive_builder_generator,
     run_fed_simulations_recursive,
     train_and_evaluate_optimal_models_from_hierarchy,
 )
-from datetime import datetime
-from flwr.common import parameters_to_ndarrays, Parameters
+from server import History
+from utils import FileSystemManager, process_histories
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -65,7 +37,7 @@ def main(cfg: DictConfig) -> None:
     """
     # 1. Print parsed config
     print(OmegaConf.to_yaml(cfg))
-    now = datetime.now()
+    datetime.now()
 
     os.environ["HYDRA_FULL_ERROR"] = "1"
     os.environ["OC_CAUSE"] = "1"
@@ -76,7 +48,7 @@ def main(cfg: DictConfig) -> None:
         **cfg.wandb.setup,
         settings=wandb.Settings(start_method="thread"),
         config=wandb_config,  # type: ignore
-    ):
+    ) as run:
         path_dict: FolderHierarchy = call(cfg.data.get_folder_hierarchy)
 
         output_directory = Path(
@@ -111,7 +83,9 @@ def main(cfg: DictConfig) -> None:
             # Contains the root node used to run the experiments
             # Its FolderHierarchy and History results
             optimal_model_histories: List[Tuple[Path, FolderHierarchy, History]] = []
-            federated_models_histories: List[Tuple[Path, FolderHierarchy, History]] = []
+            federated_models_histories: List[
+                Tuple[Path, FolderHierarchy, History]
+            ] = []
 
             (
                 client_fn,
@@ -130,16 +104,16 @@ def main(cfg: DictConfig) -> None:
             )
             # Train optimal models at every level
             if cfg.train_optimal:
-                get_client_recursive_builder: Callable[
+                get_centralised_client_recursive_builder: Callable[
                     [FolderHierarchy], RecursiveBuilder
                 ] = get_client_recursive_builder_for_parameter_type(
-                    f"parameters_optimal"
+                    "parameters_optimal"
                 )
                 optimal_model_histories.extend(
                     train_and_evaluate_optimal_models_from_hierarchy(
                         path_dict=path_dict,
                         client_fn=client_fn,
-                        get_recursive_builder=get_client_recursive_builder,
+                        get_recursive_builder=get_centralised_client_recursive_builder,
                         on_fit_config_function=on_fit_config_function,
                         on_evaluate_config_function=on_evaluate_config_function,
                         initial_parameters=parameters_to_ndarrays(initial_parameters),
@@ -169,9 +143,13 @@ def main(cfg: DictConfig) -> None:
                     )
                 )
 
-            plot_history = lambda x, output_dir, name: call(
-                cfg.fed.plot_results, hist=x, output_directory=output_dir, name=name
-            )
+            def plot_history(x, output_dir, name):
+                return call(
+                    cfg.fed.plot_results,
+                    hist=x,
+                    output_directory=output_dir,
+                    name=name,
+                )
 
             process_histories(
                 plotting_fn=plot_history,
@@ -187,7 +165,7 @@ def main(cfg: DictConfig) -> None:
                 type="",
             )
 
-        wandb.save(
+        run.save(
             str((output_directory / "*").resolve()),
             str((output_directory).resolve()),
             "now",

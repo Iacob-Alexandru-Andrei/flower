@@ -17,7 +17,7 @@ python -m isort --check-only .
 echo "- isort: done"
 
 echo "- black: start"
-python -m black --check .
+python -m black  --line-length 87 --check .
 echo "- black: done"
 
 echo "- docformatter: start"

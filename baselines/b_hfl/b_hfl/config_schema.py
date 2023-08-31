@@ -1,119 +1,88 @@
-"""Cerberus Config schema for the FEMNIST dataset."""
-from typing import Any, Dict
+"""Pydnatic Config schemas for datasets."""
+from typing import Callable, Dict, List, Optional, Union
 
-client_train_schema_recursive: Dict[str, Any] = {
-    "num_rounds": {"type": "integer", "required": True},
-    "fit_fraction": {"type": "float", "required": True},
-    "train_children": {"type": "boolean", "required": True},
-    "train_chain": {"type": "boolean", "required": True},
-    "train_proxy": {"type": "boolean", "required": True},
-}
-
-client_test_schema_recursive: Dict[str, Any] = {
-    "eval_fraction": {"type": "float", "required": True},
-    "test_children": {"type": "boolean", "required": True},
-    "test_chain": {"type": "boolean", "required": True},
-    "test_proxy": {"type": "boolean", "required": True},
-}
-
-dataloader_schema: Dict[str, Any] = {
-    "batch_size": {"type": "integer", "required": True},
-    "num_workers": {"type": "integer", "required": True},
-    "shuffle": {"type": "boolean", "required": True},
-    "test": {"type": "boolean", "required": True},
-}
+from pydantic import BaseModel
 
 
-net_config_schema: Dict[str, Any] = {"type": "dict", "nullable": True}
+class ClientTrainConfig(BaseModel):
+    """Pydantic schema for client training configuration."""
 
-parameter_config_schema: Dict[str, Any] = {"type": "dict", "nullable": True}
-
-run_config_FEMNIST_schema: Dict[str, Any] = {
-    "epochs": {"type": "integer", "required": True},
-    "client_learning_rate": {"type": "float", "required": True},
-    "weight_decay": {"type": "float", "required": True},
-}
-
-recursive_client_FEMNIST_train_schema: Dict[str, Any] = {
-    "rounds": {
-        "type": "list",
-        "schema": {
-            "type": "dict",
-            "schema": {
-                "client_config": {
-                    "type": "dict",
-                    "required": True,
-                    "schema": client_train_schema_recursive,
-                },
-                "dataloader_config": {
-                    "type": "dict",
-                    "required": True,
-                    "schema": dataloader_schema,
-                },
-                "parameter_config": {
-                    "type": "dict",
-                    "required": True,
-                    "nullable": True,
-                    # "schema": parameter_config_schema,
-                },
-                "net_config": {
-                    "type": "dict",
-                    "required": True,
-                    "nullable": True,
-                    # "schema": net_config_schema,
-                },
-                "run_config": {
-                    "type": "dict",
-                    "required": True,
-                    "schema": run_config_FEMNIST_schema,
-                },
-            },
-        },
-    }
-}
-
-recursive_client_FEMNIST_test_schema: Dict[str, Any] = {
-    "rounds": {
-        "type": "list",
-        "schema": {
-            "type": "dict",
-            "schema": {
-                "client_config": {
-                    "type": "dict",
-                    "required": True,
-                    "schema": client_test_schema_recursive,
-                },
-                "dataloader_config": {
-                    "type": "dict",
-                    "required": True,
-                    "schema": dataloader_schema,
-                },
-                "parameter_config": {
-                    "type": "dict",
-                    "required": True,
-                    "nullable": True,
-                    # "schema": parameter_config_schema,
-                },
-                "net_config": {
-                    "type": "dict",
-                    "required": True,
-                    "nullable": True,
-                    # "schema": net_config_schema,
-                },
-                "run_config": {
-                    "type": "dict",
-                    "required": True,
-                    "schema": run_config_FEMNIST_schema,
-                },
-            },
-        },
-    }
-}
+    num_rounds: int
+    fit_fraction: float
+    train_children: bool
+    train_chain: bool
+    train_proxy: bool
 
 
-def get_recursive_FEMNIST_client_schema(test: bool) -> Dict[str, Any]:
-    """Get the recursive client schema for a given config name."""
-    if not test:
-        return recursive_client_FEMNIST_train_schema
-    else:
-        return recursive_client_FEMNIST_test_schema
+class ClientTestConfig(BaseModel):
+    """Pydantic schema for client testing configuration."""
+
+    eval_fraction: float
+    test_children: bool
+    test_chain: bool
+    test_proxy: bool
+
+
+class DataloaderConfig(BaseModel):
+    """Pydantic schema for dataloader configuration."""
+
+    batch_size: int
+    num_workers: int
+    shuffle: bool
+    test: bool
+
+
+class NetConfig(BaseModel):
+    """Pydantic schema for neural network configuration."""
+
+    pass
+
+
+class ParameterConfig(BaseModel):
+    """Pydantic schema for parameter configuration."""
+
+    pass
+
+
+class NodeOptConfig(BaseModel):
+    """Pydantic schema for parameter configuration."""
+
+    pass
+
+
+class RunConfig(BaseModel):
+    """Pydantic schema for run configuration."""
+
+    epochs: int
+    client_learning_rate: float
+    weight_decay: float
+
+
+class RecClientConf(BaseModel):
+    """Pydantic schema for recursive client configuration."""
+
+    client_config: Union[ClientTrainConfig, ClientTestConfig]
+    dataloader_config: DataloaderConfig
+    parameter_config: Optional[ParameterConfig]
+    net_config: Optional[NetConfig]
+    run_config: RunConfig
+
+
+class RecClientTrainConf(RecClientConf):
+    """Pydantic schema for recursive client train confs."""
+
+    client_config: ClientTrainConfig
+
+
+class RecClientTestConf(RecClientConf):
+    """Pydantic schema for recursive client test confs."""
+
+    client_config: ClientTestConfig
+
+
+def get_recursive_client_train_configs() -> Callable:
+    return lambda **dict: RecClientTrainConf(**dict)
+
+
+def get_recursive_client_test_configs() -> Callable:
+    return lambda **dict: RecClientTestConf(**dict)

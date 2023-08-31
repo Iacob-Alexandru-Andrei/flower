@@ -23,10 +23,10 @@ get_fed_eval_fn:
   _target_: "run_simulations.get_fed_eval_fn"
 
 get_on_fit_metrics_agg_fn:
-  _target_: "utils.get_on_fit_metrics_agg_fn"
+  _target_: "utils.get_metrics_agg_fn"
 
 get_on_evaluate_metrics_agg_fn:
-  _target_: "utils.get_on_fit_metrics_agg_fn"
+  _target_: "utils.get_metrics_agg_fn"
 
 plot_results:
   _target_: "utils.plot_metric_from_history"
