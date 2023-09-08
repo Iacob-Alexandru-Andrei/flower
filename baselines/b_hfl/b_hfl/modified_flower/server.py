@@ -36,7 +36,7 @@ from flwr.common.typing import GetParametersIns
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import FedAvg, Strategy
-from history import History
+from modified_flower.history import History
 
 FitResultsAndFailures = Tuple[
     List[Tuple[ClientProxy, FitRes]],
@@ -56,7 +56,13 @@ class Server:
     """Flower server."""
 
     def __init__(
-        self, *, client_manager: ClientManager, strategy: Optional[Strategy] = None
+        self,
+        *,
+        client_manager: ClientManager,
+        use_wandb: bool,
+        eval_only: bool,
+        executor: Optional[concurrent.futures.Executor],
+        strategy: Optional[Strategy] = None,
     ) -> None:
         self._client_manager: ClientManager = client_manager
         self.parameters: Parameters = Parameters(
@@ -64,6 +70,9 @@ class Server:
         )
         self.strategy: Strategy = strategy if strategy is not None else FedAvg()
         self.max_workers: Optional[int] = None
+        self.use_wandb = use_wandb
+        self.eval_only = eval_only
+        self.executor: Optional[concurrent.futures.Executor] = executor
 
     def set_max_workers(self, max_workers: Optional[int]) -> None:
         """Set the max_workers used by ThreadPoolExecutor."""
@@ -80,7 +89,7 @@ class Server:
     # pylint: disable=too-many-locals
     def fit(self, num_rounds: int, timeout: Optional[float]) -> History:
         """Run federated averaging for a number of rounds."""
-        history = History()
+        history = History(self.use_wandb)
 
         # Initialize parameters
         log(INFO, "Initializing global parameters")
@@ -90,9 +99,8 @@ class Server:
         if res is not None:
             log(
                 INFO,
-                "initial parameters (loss, other metrics): %s, %s",
+                "initial parameters (loss): %s",
                 res[0],
-                res[1],
             )
             history.add_loss_centralized(server_round=0, loss=res[0])
             history.add_metrics_centralized(server_round=0, metrics=res[1])
@@ -103,28 +111,32 @@ class Server:
 
         for current_round in range(1, num_rounds + 1):
             # Train model and replace previous global model
-            res_fit = self.fit_round(server_round=current_round, timeout=timeout)
-            if res_fit:
-                parameters_prime, _, _ = res_fit  # fit_metrics_aggregated
-                if parameters_prime:
-                    self.parameters = parameters_prime
+            if not self.eval_only:
+                res_fit = self.fit_round(server_round=current_round, timeout=timeout)
+                if res_fit:
+                    parameters_prime, _, _ = res_fit  # fit_metrics_aggregated
+                    if parameters_prime:
+                        self.parameters = parameters_prime
 
-            # Evaluate model using strategy implementation
-            res_cen = self.strategy.evaluate(current_round, parameters=self.parameters)
-            if res_cen is not None:
-                loss_cen, metrics_cen = res_cen
-                log(
-                    INFO,
-                    "fit progress: (%s, %s, %s, %s)",
-                    current_round,
-                    loss_cen,
-                    metrics_cen,
-                    timeit.default_timer() - start_time,
+                # Evaluate model using strategy implementation
+                res_cen = self.strategy.evaluate(
+                    current_round, parameters=self.parameters
                 )
-                history.add_loss_centralized(server_round=current_round, loss=loss_cen)
-                history.add_metrics_centralized(
-                    server_round=current_round, metrics=metrics_cen
-                )
+                if res_cen is not None:
+                    loss_cen, metrics_cen = res_cen
+                    log(
+                        INFO,
+                        "fit progress: (%s, %s, %s)",
+                        current_round,
+                        loss_cen,
+                        timeit.default_timer() - start_time,
+                    )
+                    history.add_loss_centralized(
+                        server_round=current_round, loss=loss_cen
+                    )
+                    history.add_metrics_centralized(
+                        server_round=current_round, metrics=metrics_cen
+                    )
 
             # Evaluate model on a sample of available clients
             res_fed = self.evaluate_round(server_round=current_round, timeout=timeout)
@@ -159,7 +171,11 @@ class Server:
             client_manager=self._client_manager,
         )
         if not client_instructions:
-            log(INFO, "evaluate_round %s: no clients selected, cancel", server_round)
+            log(
+                INFO,
+                "evaluate_round %s: no clients selected, cancel",
+                server_round,
+            )
             return None
         log(
             DEBUG,
@@ -170,11 +186,22 @@ class Server:
         )
 
         # Collect `evaluate` results from all clients participating in this round
-        results, failures = evaluate_clients(
-            client_instructions,
-            max_workers=self.max_workers,
-            timeout=timeout,
-        )
+        if self.executor is not None:
+            results, failures = evaluate_clients(
+                client_instructions,
+                timeout=timeout,
+                executor=self.executor,
+            )
+        else:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.max_workers
+            ) as executor:
+                results, failures = evaluate_clients(
+                    client_instructions,
+                    timeout=timeout,
+                    executor=executor,
+                )
+
         log(
             DEBUG,
             "evaluate_round %s received %s results and %s failures",
@@ -219,11 +246,22 @@ class Server:
         )
 
         # Collect `fit` results from all clients participating in this round
-        results, failures = fit_clients(
-            client_instructions=client_instructions,
-            max_workers=self.max_workers,
-            timeout=timeout,
-        )
+        if self.executor is not None:
+            results, failures = fit_clients(
+                client_instructions=client_instructions,
+                timeout=timeout,
+                executor=self.executor,
+            )
+        else:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.max_workers
+            ) as executor:
+                results, failures = fit_clients(
+                    client_instructions=client_instructions,
+                    timeout=timeout,
+                    executor=executor,
+                )
+
         log(
             DEBUG,
             "fit_round %s received %s results and %s failures",
@@ -247,11 +285,21 @@ class Server:
         clients = [all_clients[k] for k in all_clients.keys()]
         instruction = ReconnectIns(seconds=None)
         client_instructions = [(client_proxy, instruction) for client_proxy in clients]
-        _ = reconnect_clients(
-            client_instructions=client_instructions,
-            max_workers=self.max_workers,
-            timeout=timeout,
-        )
+        if self.executor is not None:
+            _ = reconnect_clients(
+                client_instructions=client_instructions,
+                timeout=timeout,
+                executor=self.executor,
+            )
+        else:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.max_workers
+            ) as executor:
+                _ = reconnect_clients(
+                    client_instructions=client_instructions,
+                    timeout=timeout,
+                    executor=executor,
+                )
 
     def _get_initial_parameters(self, timeout: Optional[float]) -> Parameters:
         """Get initial parameters from one of the available clients."""
@@ -274,19 +322,18 @@ class Server:
 
 def reconnect_clients(
     client_instructions: List[Tuple[ClientProxy, ReconnectIns]],
-    max_workers: Optional[int],
     timeout: Optional[float],
+    executor: concurrent.futures.Executor,
 ) -> ReconnectResultsAndFailures:
     """Instruct clients to disconnect and never reconnect."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        submitted_fs = {
-            executor.submit(reconnect_client, client_proxy, ins, timeout)
-            for client_proxy, ins in client_instructions
-        }
-        finished_fs, _ = concurrent.futures.wait(
-            fs=submitted_fs,
-            timeout=None,  # Handled in the respective communication stack
-        )
+    submitted_fs = {
+        executor.submit(reconnect_client, client_proxy, ins, timeout)
+        for client_proxy, ins in client_instructions
+    }
+    finished_fs, _ = concurrent.futures.wait(
+        fs=submitted_fs,
+        timeout=None,  # Handled in the respective communication stack
+    )
 
     # Gather results
     results: List[Tuple[ClientProxy, DisconnectRes]] = []
@@ -316,19 +363,18 @@ def reconnect_client(
 
 def fit_clients(
     client_instructions: List[Tuple[ClientProxy, FitIns]],
-    max_workers: Optional[int],
     timeout: Optional[float],
+    executor: concurrent.futures.Executor,
 ) -> FitResultsAndFailures:
     """Refine parameters concurrently on all selected clients."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        submitted_fs = {
-            executor.submit(fit_client, client_proxy, ins, timeout)
-            for client_proxy, ins in client_instructions
-        }
-        finished_fs, _ = concurrent.futures.wait(
-            fs=submitted_fs,
-            timeout=None,  # Handled in the respective communication stack
-        )
+    submitted_fs = {
+        executor.submit(fit_client, client_proxy, ins, timeout)
+        for client_proxy, ins in client_instructions
+    }
+    finished_fs, _ = concurrent.futures.wait(
+        fs=submitted_fs,
+        timeout=None,  # Handled in the respective communication stack
+    )
 
     # Gather results
     results: List[Tuple[ClientProxy, FitRes]] = []
@@ -375,19 +421,18 @@ def _handle_finished_future_after_fit(
 
 def evaluate_clients(
     client_instructions: List[Tuple[ClientProxy, EvaluateIns]],
-    max_workers: Optional[int],
     timeout: Optional[float],
+    executor: concurrent.futures.Executor,
 ) -> EvaluateResultsAndFailures:
     """Evaluate parameters concurrently on all selected clients."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        submitted_fs = {
-            executor.submit(evaluate_client, client_proxy, ins, timeout)
-            for client_proxy, ins in client_instructions
-        }
-        finished_fs, _ = concurrent.futures.wait(
-            fs=submitted_fs,
-            timeout=None,  # Handled in the respective communication stack
-        )
+    submitted_fs = {
+        executor.submit(evaluate_client, client_proxy, ins, timeout)
+        for client_proxy, ins in client_instructions
+    }
+    finished_fs, _ = concurrent.futures.wait(
+        fs=submitted_fs,
+        timeout=None,  # Handled in the respective communication stack
+    )
 
     # Gather results
     results: List[Tuple[ClientProxy, EvaluateRes]] = []

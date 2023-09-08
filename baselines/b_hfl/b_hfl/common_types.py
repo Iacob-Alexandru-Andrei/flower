@@ -1,4 +1,5 @@
 """Common types used throughout the project."""
+from concurrent.futures import Executor, Future
 from pathlib import Path
 from typing import (
     Any,
@@ -9,18 +10,25 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Type,
     Union,
 )
 
-import flwr as fl
 import torch
-from file_system_schema import FolderHierarchy
 from flwr.common import NDArrays
 from mypy_extensions import NamedArg
+from pydantic import BaseModel
+from b_hfl.schemas.client_schema import (
+    ConfigurableRecClient,
+    RecClientRuntimeTestConf,
+    RecClientRuntimeTrainConf,
+)
+from schemas.file_system_schema import FolderHierarchy
 from state_management import DatasetManager, ParameterManager
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
+ConfigSchemaGenerator = Callable[[], Type[BaseModel]]
 TransformType = Callable[[Any], torch.Tensor]
 
 DatasetLoader = Callable[[Path], Dataset]
@@ -29,16 +37,30 @@ DatasetLoaderNoTransforms = Callable[[Path, TransformType, TransformType], Datas
 
 ParametersLoader = Callable[[Path], NDArrays]
 
-ClientGeneratorList = Sequence[Tuple[Callable[[], fl.client.NumPyClient], Dict]]
+FitRes = Tuple[NDArrays, int, Dict]
+EvalRes = Tuple[float, int, Dict]
+
+ClientFitFuture = Tuple[
+    Callable[[NDArrays, Dict, RecClientRuntimeTrainConf], Future[FitRes]], Dict
+]
+
+ClientEvaluateFuture = Tuple[
+    Callable[[NDArrays, Dict, RecClientRuntimeTestConf], Future[EvalRes]], Dict
+]
+
+ClientFitFutureList = Sequence[ClientFitFuture]
+ClientEvaluateFutureList = Sequence[ClientEvaluateFuture]
+
+ClientResGeneratorList = Union[ClientFitFutureList, ClientEvaluateFutureList]
 
 
 # Any stands in for recursive types
 # because mypy doesn't support them properly.
 RecursiveStructure = Tuple[
-    Callable[[Dict], Optional[NDArrays]],
-    Callable[[Dict], Optional[Dataset]],
-    Callable[[Dict], Optional[Dataset]],
-    ClientGeneratorList,
+    Optional[Callable[[Dict], NDArrays]],
+    Optional[Callable[[Dict], Dataset]],
+    Optional[Callable[[Dict], Dataset]],
+    ClientResGeneratorList,
     Callable[[Tuple[NDArrays, Dict], NamedArg(bool, "final")], None],
 ]
 
@@ -50,22 +72,24 @@ ClientFN = Callable[
         str,
         Path,
         Path,
-        Optional[fl.client.NumPyClient],
+        Optional[ConfigurableRecClient],
+        ConfigSchemaGenerator,
+        ConfigSchemaGenerator,
         Callable[
             [
-                fl.client.NumPyClient,
+                ConfigurableRecClient,
                 Any,
                 NamedArg(bool, "test"),
             ],
             RecursiveStructure,
         ],
     ],
-    fl.client.NumPyClient,
+    ConfigurableRecClient,
 ]
 
 RecursiveBuilder = Callable[
     [
-        fl.client.NumPyClient,
+        ConfigurableRecClient,
         ClientFN,
         NamedArg(bool, "test"),
     ],
@@ -76,7 +100,7 @@ RecursiveBuilder = Callable[
 NetGenerator = Callable[[Dict], nn.Module]
 
 
-NodeOpt = Callable[[NDArrays, Iterable[Tuple[NDArrays, int, Dict]], Dict], NDArrays]
+NodeOpt = Callable[[NDArrays, Iterable[FitRes], Dict], NDArrays]
 
 
 OptimizerGenerator = Callable[
@@ -86,9 +110,9 @@ OptimizerGenerator = Callable[
 TrainFunc = Callable[[nn.Module, DataLoader, Dict], Tuple[int, Dict]]
 
 
-TestFunc = Callable[[nn.Module, DataLoader, Dict], Tuple[float, int, Dict]]
+TestFunc = Callable[[nn.Module, DataLoader, Dict], EvalRes]
 
-DataloaderGenerator = Callable[[Optional[Dataset], Dict], Optional[DataLoader]]
+DataloaderGenerator = Callable[[Dataset, Dict], DataLoader]
 
 LoadConfig = Callable[[int, Path], Dict]
 
@@ -105,6 +129,12 @@ RecursiveBuilderWrapper = Callable[
         LoadConfig,
         str,
         str,
+        Executor,
+        ConfigSchemaGenerator,
+        ConfigSchemaGenerator,
     ],
     RecursiveBuilder,
 ]
+
+
+EvaluateFunc = Callable[[int, NDArrays, Dict], Optional[Tuple[float, Dict]]]

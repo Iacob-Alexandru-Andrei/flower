@@ -1,0 +1,8 @@
+land_x_mult_lower: -1.2
+land_x_mult_upper: 1.2
+land_y_mult_lower: -3
+land_y_mult_upper: 3
+# Must be greater than 2 to allow for 
+# the origin + w2 + w3 to be plotted
+land_x_res: 12
+land_y_res: 12

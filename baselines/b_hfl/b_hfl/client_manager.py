@@ -1,18 +1,4 @@
 """"A deterministic client manager."""
-
-#!/usr/bin/env python
-# -*-coding:utf-8 -*-
-
-# @File    :   client.py
-# @Time    :   2023/01/21 11:36:46
-# @Author  :   Alexandru-Andrei Iacob
-# @Contact :   aai30@cam.ac.uk
-# @Author  :   Lorenzo Sani
-# @Contact :   ls985@cam.ac.uk, lollonasi97@gmail.com
-# @Version :   1.0
-# @License :   (C)Copyright 2023, Alexandru-Andrei Iacob, Lorenzo Sani
-# @Desc    :   None
-
 import random
 from logging import WARNING
 from typing import List, Optional

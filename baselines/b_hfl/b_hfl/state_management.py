@@ -6,6 +6,7 @@ hierarchical structure depends on the file system, but this could be changed to 
 database or other hierarchical structure with the necesary work.
 """
 import abc
+import os
 from abc import ABC
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
@@ -111,11 +112,47 @@ class EvictionDatasetManager(DatasetManager):
             del self.dataset_dict[path]
 
 
+class NoOpDatasetManager(DatasetManager):
+    """Dataset manager that evicts datasets when it reaches a certain size."""
+
+    def __init__(
+        self,
+    ) -> None:
+        """Initialize the eviction dataset manager."""
+
+    def register_dataset(self, path: Path, dataset: Dataset) -> None:
+        """Register a dataset with the dataset manager."""
+
+    def register_chain_dataset(
+        self, path: Path, chain_files: Iterable[Path], chain_dataset: ChainDataset
+    ) -> None:
+        """Register a chain dataset with the dataset manager."""
+
+    def get_dataset(self, path: Path) -> Dataset:
+        """Get a dataset from the dataset manager."""
+        return None  # type: ignore
+
+    def unload_children_datasets(self, paths: Iterable[Path]) -> None:
+        """Unload the children datasets of a given path."""
+
+    def unload_chain_dataset(self, path: Path) -> None:
+        """Unload a chain dataset."""
+
+    def __contains__(self, path: Path) -> bool:
+        """Check if a dataset is in the dataset manager."""
+        return False
+
+
 def get_eviction_dataset_manager(
     dataset_limit: int, eviction_proportion: float
 ) -> EvictionDatasetManager:
     """Get an eviction dataset manager."""
     return EvictionDatasetManager(dataset_limit, eviction_proportion)
+
+
+def get_noop_dataset_manager() -> NoOpDatasetManager:
+    """Get an eviction dataset manager."""
+    return NoOpDatasetManager()
 
 
 class ParameterManager(ABC):
@@ -207,9 +244,9 @@ class EvictionParameterManager(ABC):
 
     def cleanup(self) -> None:
         """Cleanup the parameter manager."""
-        print("Saving parameters to disk")
-        for path in self.parameter_dict.keys():
+        for path in self.parameter_dict:
             self.save_parameters(path, None)
+        os.sync()
         self.parameter_dict = {}
 
     def _evict(self) -> None:
@@ -267,7 +304,9 @@ def process_chain_file(
 
 
 def process_file(
-    path: Path, load_file: Callable[[Path], Dataset], dataset_manager: DatasetManager
+    path: Path,
+    load_file: Callable[[Path], Dataset],
+    dataset_manager: DatasetManager,
 ) -> Dataset:
     """Process a file or chain file to create a dataset."""
     if "chain" in path.name:

@@ -349,7 +349,9 @@ def sample_without_replacement(
     return (data_array, target_array), empty_classes
 
 
-def get_partitions_distributions(partitions: XYList) -> Tuple[np.ndarray, List[int]]:
+def get_partitions_distributions(
+    partitions: XYList,
+) -> Tuple[np.ndarray, List[int]]:
     """Evaluate the distribution over classes for a set of partitions.
 
     Args:

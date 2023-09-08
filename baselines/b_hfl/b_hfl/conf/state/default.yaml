@@ -1,9 +1,4 @@
 
-
-# for "get_eviction_dataset_manager"
-dataset_limit: 20
-dataset_eviction_proportion: 0.5
-
 # for "get_eviction_parameter_manager"
 parameters_limit: 1000
 parameters_eviction_proportion: 0.5
@@ -11,6 +6,7 @@ parameters_eviction_proportion: 0.5
 to_clean:
   - "parameters"
   - "history"
+  - "config"
 
 save_frequency: 100
 
@@ -25,18 +21,18 @@ to_save_once:
   - "history"
 
 get_recursive_builder:
-  _target_: "client.get_recursive_builder_wrapper"
+  _target_: "client.recursive_builder.get_recursive_builder_wrapper"
   
 get_dataset_manager: 
-  _target_: "state_management.get_eviction_dataset_manager"
-  dataset_limit: ${state.dataset_limit}
-  eviction_proportion: ${state.dataset_eviction_proportion}
-  
+  _target_: "state_management.get_noop_dataset_manager"
+
 get_load_parameters_file:
   _target_: "utils.load_parameters_file"
 
 get_save_parameters_to_file:
   _target_: "utils.save_parameters_to_file"
+
+parameters_extension: ".npz"
 
 get_parameter_manager:
   _target_: "state_management.get_eviction_parameter_manager"

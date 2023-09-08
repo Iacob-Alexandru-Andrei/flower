@@ -18,19 +18,20 @@
 from functools import reduce
 from typing import Dict, List, Tuple
 
-from flwr.common.typing import Scalar
 import wandb
+from flwr.common.typing import Scalar
 
 
 class History:
     """History class for training and/or evaluation metrics collection."""
 
-    def __init__(self) -> None:
+    def __init__(self, use_wandb=True) -> None:
         self.losses_distributed: List[Tuple[int, float]] = []
         self.losses_centralized: List[Tuple[int, float]] = []
         self.metrics_distributed_fit: Dict[str, List[Tuple[int, Scalar]]] = {}
         self.metrics_distributed: Dict[str, List[Tuple[int, Scalar]]] = {}
         self.metrics_centralized: Dict[str, List[Tuple[int, Scalar]]] = {}
+        self.use_wandb = use_wandb
 
     def add_loss_distributed(self, server_round: int, loss: float) -> None:
         """Add one loss entry (from distributed evaluation)."""
@@ -38,8 +39,9 @@ class History:
 
     def add_loss_centralized(self, server_round: int, loss: float) -> None:
         """Add one loss entry (from centralized evaluation)."""
-        wandb.log({"centralised_loss": loss}, step=server_round)
         self.losses_centralized.append((server_round, loss))
+        if self.use_wandb:
+            wandb.log({"centralised_loss": loss}, step=server_round)
 
     def add_metrics_distributed_fit(
         self, server_round: int, metrics: Dict[str, Scalar]
@@ -51,7 +53,8 @@ class History:
             if key not in self.metrics_distributed_fit:
                 self.metrics_distributed_fit[key] = []
             self.metrics_distributed_fit[key].append((server_round, metrics[key]))
-            wandb.log({key: metrics[key]}, step=server_round)
+            if self.use_wandb:
+                wandb.log({key: metrics[key]}, step=server_round)
 
     def add_metrics_distributed(
         self, server_round: int, metrics: Dict[str, Scalar]
@@ -63,7 +66,8 @@ class History:
             if key not in self.metrics_distributed:
                 self.metrics_distributed[key] = []
             self.metrics_distributed[key].append((server_round, metrics[key]))
-            wandb.log({key: metrics[key]}, step=server_round)
+            if self.use_wandb:
+                wandb.log({key: metrics[key]}, step=server_round)
 
     def add_metrics_centralized(
         self, server_round: int, metrics: Dict[str, Scalar]
@@ -75,7 +79,8 @@ class History:
             if key not in self.metrics_centralized:
                 self.metrics_centralized[key] = []
             self.metrics_centralized[key].append((server_round, metrics[key]))
-            wandb.log({key: metrics[key]}, step=server_round)
+            if self.use_wandb:
+                wandb.log({key: metrics[key]}, step=server_round)
 
     def __repr__(self) -> str:
         """Create a representation of History.

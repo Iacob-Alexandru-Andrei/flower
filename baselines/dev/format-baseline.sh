@@ -8,8 +8,12 @@ fi
 cd "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"/../$1
 
 echo "Formatting started"
+echo "Run isort"
 poetry run python -m isort .
-poetry run python -m black --line-length 82 -q .
+echo "Run black"
+poetry run python -m black --line-length 88 -q .
+echo "Run docformatter"
 poetry run python -m docformatter -i -r .
+echo "Run ruff"
 poetry run python -m ruff check --fix .
 echo "Formatting done"

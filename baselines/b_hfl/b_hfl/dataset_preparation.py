@@ -14,17 +14,18 @@ from collections import defaultdict
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import gdown
-from config_schema import RecClientTrainConf
-from file_system_schema import (
+from common_types import ConfigSchemaGenerator
+from omegaconf import DictConfig, OmegaConf
+from pydantic import BaseModel
+from b_hfl.schemas.client_schema import RecClientTrainConf
+from schemas.file_system_schema import (
     ClientFolderHierarchy,
     ConfigFolderHierarchy,
     FolderHierarchy,
 )
-from omegaconf import DictConfig, OmegaConf
-from pydantic import BaseModel
 
 # @hydra.main(config_path="conf", config_name="base", version_base=None)
 # def download_and_preprocess(cfg: DictConfig) -> None:
@@ -44,8 +45,8 @@ from pydantic import BaseModel
 #     # for parts that can be customised (e.g. how data is partitioned)
 
 
-def download_FEMNIST(dataset_dir: Path = Path("data/femnist")) -> None:
-    """Download and extract the FEMNIST dataset."""
+def download_femnist(dataset_dir: Path = Path("data/femnist")) -> None:
+    """Download and extract the femnist dataset."""
     #  Download compressed dataset
     data_file = dataset_dir / "femnist.tar.gz"
     if not data_file.exists():
@@ -169,6 +170,7 @@ def child_map_to_file_hierarchy(
     """
     child_mapping = extract_child_mapping(in_root)
 
+    # pylint: disable=too-many-locals
     def rec_child_map_to_file_hierarchy(
         client_file_hierarchy: ClientFolderHierarchy,
         parent_path: Path,
@@ -233,12 +235,12 @@ def config_map_to_file_hierarchy(
         config_folder_hierarchy: ConfigFolderHierarchy,
     ) -> None:
         on_fit_configs = [
-            on_fit_config.json()
+            on_fit_config.dict()
             for on_fit_config in config_folder_hierarchy.on_fit_configs
         ]
 
         on_evaluate_configs = [
-            on_evaluate_config.json()
+            on_evaluate_config.dict()
             for on_evaluate_config in config_folder_hierarchy.on_evaluate_configs
         ]
         with open(config_folder_hierarchy.path / "on_fit_config.json", "w") as f:
@@ -252,10 +254,9 @@ def config_map_to_file_hierarchy(
 
     rec_config_map_to_file_hierarchy(logical_mapping)
     os.sync()
-    return None
 
 
-default_FEMNIST_recursive_fit_config = [
+default_femnist_recursive_fit_config = [
     {
         "client_config": {
             "num_rounds": 1,
@@ -280,7 +281,7 @@ default_FEMNIST_recursive_fit_config = [
     }
 ]
 
-default_FEMNIST_recursive_evaluate_config = [
+default_femnist_recursive_evaluate_config = [
     {
         "client_config": {
             "eval_fraction": 1.0,
@@ -306,18 +307,19 @@ default_FEMNIST_recursive_evaluate_config = [
 
 
 def get_uniform_configs_wrapped(
-    train_config_schema: Type[BaseModel],
-    test_config_schema: Type[BaseModel],
-    on_fit_configs: List[Dict] = default_FEMNIST_recursive_fit_config,
-    on_evaluate_configs: List[Dict] = default_FEMNIST_recursive_evaluate_config,
+    train_config_schema: ConfigSchemaGenerator,
+    test_config_schema: ConfigSchemaGenerator,
+    on_fit_configs: List[Dict] = default_femnist_recursive_fit_config,
+    on_evaluate_configs: List[Dict] = default_femnist_recursive_evaluate_config,
 ) -> Callable[[FolderHierarchy], ConfigFolderHierarchy]:
     """Get a uniform config hierarchy."""
+    train_schema = train_config_schema()
+    test_schema = test_config_schema()
     new_on_fit_configs: List[BaseModel] = [
-        train_config_schema(**on_fit_config) for on_fit_config in on_fit_configs
+        train_schema(**on_fit_config) for on_fit_config in on_fit_configs
     ]
     new_on_evaluate_configs: List[BaseModel] = [
-        test_config_schema(**on_evaluate_config)
-        for on_evaluate_config in on_evaluate_configs
+        test_schema(**on_evaluate_config) for on_evaluate_config in on_evaluate_configs
     ]
 
     def wrapped_get_uniform_config(
@@ -327,7 +329,7 @@ def get_uniform_configs_wrapped(
             path_dict, new_on_fit_configs, new_on_evaluate_configs
         )
 
-    return lambda path_dict: wrapped_get_uniform_config(path_dict)
+    return wrapped_get_uniform_config
 
 
 def get_uniform_configs(
@@ -361,6 +363,7 @@ if __name__ == "__main__":
     src_folder = Path(
         "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/fed_natural"
     )
+    # pylint: disable=line-too-long
     out_folder = Path(
         "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/hierarchical_test"
     )

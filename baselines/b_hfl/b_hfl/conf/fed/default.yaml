@@ -1,20 +1,24 @@
 num_rounds: 10
 
-num_clients_per_round: 2
-num_total_clients: 2
+num_clients_per_round: 1
+num_total_clients: 1
 num_evaluate_clients_per_round: 0
 seed: 42
 
+max_workers: null
 gpus_per_client: 0
-cpus_per_client: 4
+cpus_per_client: 1
+timeout: null
 
 get_on_fit_config_fn:
   _target_: "utils.get_config"
   config_name: "on_fit"
+  seed: ${fed.seed}
 
 get_on_evaluate_config_fn:
   _target_: "utils.get_config"
   config_name: "on_evaluate"
+  seed: ${fed.seed}
 
 get_initial_parameters:
   _target_: "utils.get_initial_parameters"

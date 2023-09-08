@@ -37,7 +37,7 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.8.15, <3.12.0"  # don't change this
+python = ">=3.8.15, <3.11.0"  # don't change this
 flwr = "1.3.0" # don't change this
 ray = "1.11.1" # don't change this
 hydra-core = "1.3.2" # don't change this
@@ -56,7 +56,7 @@ pydantic = "<2"
 
 [tool.poetry.dev-dependencies]
 isort = "==5.11.5"
-black = "==23.1.0"
+black = { version = "==23.1.0", extras = ["jupyter"] }
 docformatter = "==1.5.1"
 mypy = "==0.961"
 pylint = "==2.8.2"
@@ -91,8 +91,8 @@ strict = false
 plugins = "numpy.typing.mypy_plugin"
 
 [tool.pylint."MESSAGES CONTROL"]
-disable = "bad-continuation,duplicate-code,too-few-public-methods,useless-import-alias"
-good-names = "i,j,k,_,x,y,X,Y"
+disable = "bad-continuation,duplicate-code,too-few-public-methods,useless-import-alias,import-error,no-member,no-name-in-module"
+good-names = "f,i,j,k,_,x,y,X,Y"
 signature-mutators="hydra.main.main"
 
 [[tool.mypy.overrides]]

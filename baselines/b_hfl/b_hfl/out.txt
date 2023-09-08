@@ -1,0 +1,127 @@
+WARNING flwr 2023-09-01 09:41:31,930 | app.py:187 | Both server and strategy were provided, ignoring strategy
+reuse_output_dir: null
+train_optimal: true
+recursively_train_all_optimal_models: true
+optimal_type: _optimal
+train_fed: true
+recursively_fed_simulate_all: false
+fed_type: _root_${data.client_folder}
+use_wandb: false
+wandb:
+  mode: enabled
+  setup:
+    project: B_HFL_ICLR
+    group: ${data.dataset_path}
+    tags:
+    - strategy_${strategy.name}
+    - net_${client.network}
+    - seed_${fed.seed}
+    entity: null
+    mode: online
+client:
+  alpha: 0.5
+  network: CNN
+  get_net_generator:
+    _target_: models.get_generate_model
+    network: ${client.network}
+  get_test:
+    _target_: task_utils.test_FEMNIST
+  get_optimizer_generator:
+    _target_: task_utils.optimizer_generator_FEMNIST
+  get_train:
+    _target_: task_utils.train_FEMNIST
+  get_node_opt:
+    _target_: node_optimizers.get_fedavg_weighted_node_opt
+    alpha: ${client.alpha}
+  get_client_fn:
+    _target_: client.get_client_fn
+fed:
+  num_rounds: 10
+  num_clients_per_round: 2
+  num_total_clients: 2
+  num_evaluate_clients_per_round: 0
+  seed: 42
+  gpus_per_client: 0
+  cpus_per_client: 4
+  get_on_fit_config_fn:
+    _target_: utils.get_config
+    config_name: on_fit
+  get_on_evaluate_config_fn:
+    _target_: utils.get_config
+    config_name: on_evaluate
+  get_initial_parameters:
+    _target_: utils.get_initial_parameters
+  get_fed_eval_fn:
+    _target_: run_simulations.get_fed_eval_fn
+  get_on_fit_metrics_agg_fn:
+    _target_: utils.get_metrics_agg_fn
+  get_on_evaluate_metrics_agg_fn:
+    _target_: utils.get_metrics_agg_fn
+  plot_results:
+    _target_: utils.plot_metric_from_history
+data:
+  data_dir: /home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/data/
+  dataset_path: /home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/hierarchical_test/
+  client_folder: '0'
+  get_folder_hierarchy:
+    _target_: dataset_preparation.get_folder_hierarchy
+    path: ${data.dataset_path}${data.client_folder}
+  get_transform:
+    _target_: task_utils.get_image_to_tensor_transform
+  get_target_transform:
+    _target_: task_utils.to_tensor_transform
+  get_load_dataset_file:
+    _target_: dataset.get_load_FEMNIST_file
+    input_data_dir: ${data.data_dir}
+  get_create_dataloader:
+    _target_: dataset.create_dataloader_FEMNIST
+  get_config_mapping:
+    _target_: dataset_preparation.get_uniform_configs_wrapped
+  get_train_config_schema:
+    _target_: config_schema.get_recursive_client_train_configs
+  get_test_config_schema:
+    _target_: config_schema.get_recursive_client_test_configs
+  create_configs:
+    _target_: dataset_preparation.config_map_to_file_hierarchy
+state:
+  dataset_limit: 20
+  dataset_eviction_proportion: 0.5
+  parameters_limit: 1000
+  parameters_eviction_proportion: 0.5
+  to_clean:
+  - parameters
+  - history
+  - config
+  save_frequency: 100
+  save_per_round:
+  - parameters
+  to_save_once:
+  - parameters
+  - config
+  - train
+  - test
+  - history
+  get_recursive_builder:
+    _target_: client.get_recursive_builder_wrapper
+  get_dataset_manager:
+    _target_: state_management.get_eviction_dataset_manager
+    dataset_limit: ${state.dataset_limit}
+    eviction_proportion: ${state.dataset_eviction_proportion}
+  get_load_parameters_file:
+    _target_: utils.load_parameters_file
+  get_save_parameters_to_file:
+    _target_: utils.save_parameters_to_file
+  get_parameter_manager:
+    _target_: state_management.get_eviction_parameter_manager
+    parameters_limit: ${state.parameters_limit}
+    eviction_proportion: ${state.parameters_eviction_proportion}
+strategy:
+  name: FedAvg
+  expected_accuracy: 94.3
+  init:
+    _target_: strategy.LoggingFedAvg
+
+Pre-cleaning ['parameters', 'history', 'config']
+[2023-09-01 09:41:31,930][flwr][WARNING] - Both server and strategy were provided, ignoring strategy
+INFO flwr 2023-09-01 09:41:31,930 | app.py:145 | Starting Flower simulation, config: ServerConfig(num_rounds=10, round_timeout=None)
+[2023-09-01 09:41:31,930][flwr][INFO] - Starting Flower simulation, config: ServerConfig(num_rounds=10, round_timeout=None)

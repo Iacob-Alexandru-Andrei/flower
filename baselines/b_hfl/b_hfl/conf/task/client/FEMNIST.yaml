@@ -1,0 +1,15 @@
+network: "CNN"
+
+get_net_generator:
+  _target_: "models.get_generate_model"
+  network:  ${task.client.network}
+
+get_test: 
+  _target_: "task_utils.test_femnist"
+
+get_optimizer_generator:
+  _target_: "task_utils.optimizer_generator_femnist"
+
+get_train:
+  _target_: "task_utils.train_femnist"
+

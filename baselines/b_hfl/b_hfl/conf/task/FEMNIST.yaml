@@ -1,0 +1,9 @@
+defaults:
+  - _self_
+  - client: FEMNIST
+  - data: FEMNIST
+
+
+
+
+

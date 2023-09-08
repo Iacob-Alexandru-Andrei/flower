@@ -1,27 +1,36 @@
 defaults:
   - _self_
-  - client: FEMNIST
+  - client: default
   - fed: default
-  - data: FEMNIST
+  - data: default
   - state: default
   - strategy: fed_avg
+  - plotting: default
+  - task: FEMNIST
 
 reuse_output_dir: Null
 
 train_optimal: True
 recursively_train_all_optimal_models: True
+optimal_name : "_optimal"
+optimal_type: "${optimal_name}_root_${task.data.client_folder}"
 
 train_fed: True
-recursively_fed_simulate_all: True
+recursively_fed_simulate_all: False
+fed_name: "_fed"
+fed_type: "${fed_name}_root_${task.data.client_folder}"
 
+use_wandb: True
+eval_only: False
 
 wandb:
+  mode: "enabled"
   setup:
     project: B_HFL_ICLR
-    group: ${data.dataset_path}
+    group: ${task.data.dataset_path}
     tags:
       - "strategy_${strategy.name}"
-      - "net_${client.network}"
+      - "net_${task.client.network}"
       - "seed_${fed.seed}"
     entity:
     mode: online

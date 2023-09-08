@@ -67,7 +67,8 @@ def get_generate_model(network: str) -> Callable[[Dict], nn.Module]:
     """
     if network == "MLP":
         return lambda cfg: MLP()
-    elif network == "CNN":
+
+    if network == "CNN":
         return lambda cfg: Net()
-    else:
-        raise ValueError(f"Unknown network {network}")
+
+    raise ValueError(f"Unknown network {network}")

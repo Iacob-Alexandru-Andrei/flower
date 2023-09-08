@@ -1,18 +1,5 @@
 """Train/eval functions for a given dataset/task."""
 
-#!/usr/bin/env python
-# -*-coding:utf-8 -*-
-
-# @File    :   client.py
-# @Time    :   2023/01/21 11:36:46
-# @Author  :   Alexandru-Andrei Iacob
-# @Contact :   aai30@cam.ac.uk
-# @Author  :   Lorenzo Sani
-# @Contact :   ls985@cam.ac.uk, lollonasi97@gmail.com
-# @Version :   1.0
-# @License :   (C)Copyright 2023, Alexandru-Andrei Iacob, Lorenzo Sani
-# @Desc    :   None
-
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Iterator, Tuple
 
@@ -79,10 +66,10 @@ def optimizer_generator_decorator(
 
 
 @lazy_wrapper
-def optimizer_generator_FEMNIST(
+def optimizer_generator_femnist(
     parameters: Iterator[nn.parameter.Parameter], cfg: Dict
 ) -> torch.optim.Optimizer:
-    """Create an AdamW optimizer for the FEMNIST dataset."""
+    """Create an AdamW optimizer for the femnist dataset."""
     return torch.optim.AdamW(
         parameters,
         lr=float(cfg["client_learning_rate"]),
@@ -91,7 +78,7 @@ def optimizer_generator_FEMNIST(
 
 
 @lazy_wrapper
-def train_FEMNIST(
+def train_femnist(
     net: nn.Module,
     train_loader: DataLoader,
     cfg: Dict,
@@ -132,7 +119,7 @@ def train_FEMNIST(
 
 
 @lazy_wrapper
-def test_FEMNIST(
+def test_femnist(
     net: nn.Module,
     test_loader: DataLoader,
     cfg: Dict,
@@ -259,7 +246,7 @@ def get_model_parameters(net: nn.Module) -> NDArrays:
 #     """
 
 #     full_file: Path = centralized_mapping
-#     dataset: Dataset = load_FEMNIST_dataset(data_dir, full_file, "val")
+#     dataset: Dataset = load_femnist_dataset(data_dir, full_file, "val")
 
 #     def federated_evaluation_function(
 #         server_round: int,
@@ -290,7 +277,7 @@ def get_model_parameters(net: nn.Module) -> NDArrays:
 #             drop_last=False,
 #         )
 
-#         loss, acc = test_FEMNIST(
+#         loss, acc = test_femnist(
 #             net=net,
 #             test_loader=valid_loader,
 #             device=device,

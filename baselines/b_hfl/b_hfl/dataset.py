@@ -28,37 +28,37 @@ def torch_tensor_to_dataset(tensor: torch.Tensor) -> Dataset:
     return TensorDataset(tensor)
 
 
-def get_load_FEMNIST_file(input_data_dir: str) -> DatasetLoaderNoTransforms:
-    """Create a function that loads the FEMNIST dataset from a file.
+def get_load_femnist_file(input_data_dir: str) -> DatasetLoaderNoTransforms:
+    """Create a function that loads the femnist dataset from a file.
 
     Specifies the data dir from which the samples are loaded.
     """
     data_dir = Path(input_data_dir)
 
-    def load_FEMNIST_file(
+    def load_femnist_file(
         path: Path, transform: TransformType, target_transform: TransformType
     ) -> Dataset:
-        """Load a FEMNIST file as a torch tensor."""
+        """Load a femnist file as a torch tensor."""
         nonlocal data_dir
         preprocessed_path: Path = path.with_suffix(".pt")
         if not preprocessed_path.exists():
             csv_path = path.with_suffix(".csv")
             if not csv_path.exists():
                 raise ValueError(f"Required files do not exist, path: {csv_path}")
-            else:
-                with open(csv_path, mode="r") as csv_file:
-                    csv_reader = csv.reader(csv_file)
-                    # Ignore header
-                    next(csv_reader)
 
-                    # Extract the samples and the labels
-                    partition = [
-                        (sample_path, int(label_id))
-                        for _, sample_path, _, label_id in csv_reader
-                    ]
+            with open(csv_path, mode="r") as csv_file:
+                csv_reader = csv.reader(csv_file)
+                # Ignore header
+                next(csv_reader)
 
-                    # Save for future loading
-                    torch.save(partition, preprocessed_path)
+                # Extract the samples and the labels
+                partition = [
+                    (sample_path, int(label_id))
+                    for _, sample_path, _, label_id in csv_reader
+                ]
+
+                # Save for future loading
+                torch.save(partition, preprocessed_path)
 
         return FEMNIST(
             path=preprocessed_path,
@@ -67,16 +67,12 @@ def get_load_FEMNIST_file(input_data_dir: str) -> DatasetLoaderNoTransforms:
             target_transform=target_transform,
         )
 
-    return load_FEMNIST_file
+    return load_femnist_file
 
 
 @lazy_wrapper
-def create_dataloader_FEMNIST(
-    dataset: Optional[Dataset], cfg: Dict
-) -> Optional[DataLoader]:
-    """Create a dataloader for the FEMNIST dataset."""
-    if dataset is None:
-        return None
+def create_dataloader_femnist(dataset: Dataset, cfg: Dict) -> Optional[DataLoader]:
+    """Create a dataloader for the femnist dataset."""
     return DataLoader(
         dataset=dataset,
         batch_size=cfg["batch_size"],
@@ -87,7 +83,7 @@ def create_dataloader_FEMNIST(
 
 
 class FEMNIST(Dataset):
-    """Create a PyTorch dataset from the FEMNIST dataset."""
+    """Create a PyTorch dataset from the femnist dataset."""
 
     def __init__(
         self,
