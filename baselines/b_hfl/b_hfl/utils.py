@@ -17,8 +17,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import ray
 import torch
+from flwr.common import Metrics, NDArrays, Parameters, ndarrays_to_parameters
+from torch import nn
+from torch.utils.data import Dataset
+from traitlets import Bool
+
 import wandb
-from common_types import (
+from b_hfl.common_types import (
     ClientFN,
     DatasetLoader,
     LoadConfig,
@@ -26,12 +31,8 @@ from common_types import (
     RecursiveBuilder,
     TransformType,
 )
-from dataset_preparation import FolderHierarchy
-from flwr.common import Metrics, NDArrays, Parameters, ndarrays_to_parameters
-from modified_flower.server import History
-from torch import nn
-from torch.utils.data import Dataset
-from traitlets import Bool
+from b_hfl.dataset_preparation import FolderHierarchy
+from b_hfl.modified_flower.server import History
 
 
 def get_parameters(net: nn.Module) -> NDArrays:

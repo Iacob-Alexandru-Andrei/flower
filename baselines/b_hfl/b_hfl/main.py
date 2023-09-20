@@ -11,20 +11,22 @@ from pathlib import Path
 from typing import Callable, List, Tuple
 
 import hydra
-import wandb
 import yaml
-from common_types import FolderHierarchy, RecursiveBuilder
 from flwr.common import Parameters, parameters_to_ndarrays
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import call
-from modified_flower.server import History
 from omegaconf import DictConfig, OmegaConf
-from run_simulations import (
+
+import wandb
+from b_hfl.common_types import RecursiveBuilder
+from b_hfl.modified_flower.server import History
+from b_hfl.run_simulations import (
     build_hydra_client_fn_and_recursive_builder_generator,
     run_fed_simulations_recursive,
     train_and_evaluate_optimal_models_from_hierarchy,
 )
-from utils import FileSystemManager, process_histories, wandb_init
+from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.utils import FileSystemManager, process_histories, wandb_init
 
 
 # pylint: disable=too-many-locals

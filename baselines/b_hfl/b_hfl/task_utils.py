@@ -5,13 +5,14 @@ from typing import Any, Callable, Dict, Iterator, Tuple
 
 import numpy as np
 import torch
-from common_types import OptimizerGenerator, TrainFunc
 from flwr.common.typing import NDArrays
 from PIL.Image import Image as ImageType
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from utils import lazy_wrapper
+
+from b_hfl.common_types import OptimizerGenerator, TrainFunc
+from b_hfl.utils import lazy_wrapper
 
 
 # Load with appropriate transforms

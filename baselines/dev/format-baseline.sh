@@ -11,7 +11,7 @@ echo "Formatting started"
 echo "Run isort"
 poetry run python -m isort .
 echo "Run black"
-poetry run python -m black --line-length 88 -q .
+poetry run python -m black -q .
 echo "Run docformatter"
 poetry run python -m docformatter -i -r .
 echo "Run ruff"

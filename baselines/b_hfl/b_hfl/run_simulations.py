@@ -7,35 +7,39 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import flwr as fl
-from client_manager import DeterministicClientManager
-from common_types import (
+from flwr.common import NDArrays, Parameters
+from flwr.server import ServerConfig
+from hydra.utils import call, instantiate
+from omegaconf import DictConfig
+
+from b_hfl.client.client import get_client_fn
+from b_hfl.client.recursive_builder import (
+    get_recursive_builder as recursive_bulder_generator,
+)
+from b_hfl.client_manager import DeterministicClientManager
+from b_hfl.common_types import (
     ClientFN,
     ConfigSchemaGenerator,
     DataloaderGenerator,
     DatasetLoader,
     DatasetLoaderNoTransforms,
     EvaluateFunc,
-    FolderHierarchy,
     LoadConfig,
     NetGenerator,
     NodeOpt,
     ParametersLoader,
     RecursiveBuilder,
-    RecursiveBuilderWrapper,
     TestFunc,
     TrainFunc,
     TransformType,
 )
-from dataset_preparation import ConfigFolderHierarchy
-from flwr.common import NDArrays, Parameters
-from flwr.server import ServerConfig
-from hydra.utils import call, instantiate
-from modified_flower.app import start_simulation
-from modified_flower.server import History, Server
-from omegaconf import DictConfig
-from strategy import LoggingFedAvg
-from task_utils import optimizer_generator_decorator
-from utils import (
+from b_hfl.dataset_preparation import ConfigFolderHierarchy
+from b_hfl.modified_flower.app import start_simulation
+from b_hfl.modified_flower.server import History, Server
+from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.strategy import LoggingFedAvg
+from b_hfl.task_utils import optimizer_generator_decorator
+from b_hfl.utils import (
     decorate_client_fn_with_recursive_builder,
     decorate_dataset_with_transforms,
     get_save_files_every_round,
@@ -136,7 +140,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     )(call(cfg.task.client.get_train))
     test: TestFunc = call(cfg.task.client.get_test)
 
-    node_opt: NodeOpt = call(cfg.client.get_node_opt)
+    anc_node_opt: NodeOpt = call(cfg.client.get_anc_node_opt)
+    desc_node_opt: NodeOpt = call(cfg.client.get_desc_node_opt)
 
     create_dataloader: DataloaderGenerator = call(cfg.task.data.get_create_dataloader)
 
@@ -145,10 +150,10 @@ def build_hydra_client_fn_and_recursive_builder_generator(
         "num_gpus": cfg.fed.gpus_per_client,
     }
 
-    client_fn: ClientFN = call(
-        cfg.client.get_client_fn,
+    client_fn: ClientFN = get_client_fn(
         net_generator=net_generator,
-        node_opt=node_opt,
+        anc_node_opt=anc_node_opt,
+        desc_node_opt=desc_node_opt,
         train=train,
         test=test,
         create_dataloader=create_dataloader,
@@ -173,9 +178,6 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     on_fit_config_function: LoadConfig = call(cfg.fed.get_on_fit_config_fn)
 
     on_evaluate_config_function: LoadConfig = call(cfg.fed.get_on_evaluate_config_fn)
-    recursive_builder_wrapper: RecursiveBuilderWrapper = call(
-        cfg.state.get_recursive_builder
-    )
 
     def get_client_recursive_builder_for_parameter_type(
         parameters_file_name: str,
@@ -183,7 +185,7 @@ def build_hydra_client_fn_and_recursive_builder_generator(
         """Get the recursive builder for a given parameter type."""
 
         def get_client_recursive_builder(x: FolderHierarchy) -> RecursiveBuilder:
-            return recursive_builder_wrapper(
+            return recursive_bulder_generator(
                 root=x.path,  # type: ignore
                 path_dict=x,
                 load_dataset_file=load_dataset_file,

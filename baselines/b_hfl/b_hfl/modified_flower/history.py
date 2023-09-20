@@ -18,8 +18,9 @@
 from functools import reduce
 from typing import Dict, List, Tuple
 
-import wandb
 from flwr.common.typing import Scalar
+
+import wandb
 
 
 class History:
@@ -36,6 +37,8 @@ class History:
     def add_loss_distributed(self, server_round: int, loss: float) -> None:
         """Add one loss entry (from distributed evaluation)."""
         self.losses_distributed.append((server_round, loss))
+        if self.use_wandb:
+            wandb.log({"distributed_loss": loss}, step=server_round)
 
     def add_loss_centralized(self, server_round: int, loss: float) -> None:
         """Add one loss entry (from centralized evaluation)."""

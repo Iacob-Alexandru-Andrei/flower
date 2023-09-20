@@ -169,3 +169,7 @@ poetry.lock
 
 # iOS
 xcuserdata/
+
+# W&B + Hydra
+outputs/
+wandb/

@@ -53,6 +53,7 @@ seaborn = "^0.12.2"
 pandas = "^2.0.3"
 types-protobuf = "^4.24.0.1"
 pydantic = "<2"
+omegaconf = "2.3.0"
 
 [tool.poetry.dev-dependencies]
 isort = "==5.11.5"

@@ -1,10 +1,12 @@
 """Pydnatic Config schemas for datasets."""
 import abc
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import flwr as fl
 from flwr.common import NDArrays
 from pydantic import BaseModel
+
+from b_hfl.common_types import State
 
 
 class ClientConfig(BaseModel):
@@ -16,11 +18,15 @@ class ClientConfig(BaseModel):
 class ClientTrainConfig(ClientConfig):
     """Pydantic schema for client training configuration."""
 
+    initial_state: State
     num_rounds: int
+    num_examples: int
     fit_fraction: float
     train_children: bool
     train_chain: bool
     train_proxy: bool
+    root_to_leaf_residuals: List[Any]
+    leaf_to_root_residuals: List[Any]
 
 
 class ClientTestConfig(ClientConfig):
@@ -53,6 +59,10 @@ class NodeOptConfig(BaseModel):
     """Pydantic schema for parameter configuration."""
 
 
+class StateGeneratorConfig(BaseModel):
+    """Pydantic schema for state generator config."""
+
+
 class GetParametersConfig(BaseModel):
     """Pydantic schema for requiesting parameters."""
 
@@ -80,6 +90,7 @@ class RecClientRuntimeConf(BaseModel):
     parameter_config: Dict
     net_config: Dict
     run_config: Dict
+    state_generator_config: Dict
     node_optimizer_config: Dict
     get_parameters_config: Dict
     dataset_generator_config: Dict
@@ -108,6 +119,7 @@ class RecClientConf(BaseModel):
     client_seed: Optional[int]
     parameter_config: Optional[ParameterConfig]
     net_config: Optional[NetConfig]
+    state_generator_config: Optional[StateGeneratorConfig]
     node_optimizer_config: Optional[NodeOptConfig]
     get_parameters_config: Optional[GetParametersConfig]
     dataset_generator_config: Optional[DatasetGeneratorConfig]

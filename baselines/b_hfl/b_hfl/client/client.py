@@ -10,22 +10,6 @@ from typing import Callable, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import ray
 import utils
-from common_types import (
-    ClientEvaluateFutureList,
-    ClientFitFutureList,
-    ClientFN,
-    ClientResGeneratorList,
-    ConfigSchemaGenerator,
-    DataloaderGenerator,
-    EvalRes,
-    FitRes,
-    NetGenerator,
-    NodeOpt,
-    RecursiveBuilder,
-    RecursiveStructure,
-    TestFunc,
-    TrainFunc,
-)
 from flwr.common import (
     Code,
     GetPropertiesIns,
@@ -35,13 +19,32 @@ from flwr.common import (
     NDArrays,
     Status,
 )
+from torch.utils.data import Dataset
+from utils import get_parameters, get_seeded_rng, set_parameters
+
+from b_hfl.common_types import (
+    ClientEvaluateFutureList,
+    ClientFitFutureList,
+    ClientFN,
+    ClientResGeneratorList,
+    ConfigSchemaGenerator,
+    DataloaderGenerator,
+    EvalRecursiveStructure,
+    EvalRes,
+    FitRecursiveStructure,
+    FitRes,
+    NetGenerator,
+    NodeOpt,
+    RecursiveBuilder,
+    RecursiveStructure,
+    TestFunc,
+    TrainFunc,
+)
 from b_hfl.schemas.client_schema import (
     ConfigurableRecClient,
     RecClientRuntimeTestConf,
     RecClientRuntimeTrainConf,
 )
-from torch.utils.data import Dataset
-from utils import get_parameters, get_seeded_rng, set_parameters
 
 
 class RecursiveClient(ConfigurableRecClient):
@@ -59,7 +62,8 @@ class RecursiveClient(ConfigurableRecClient):
         root: Path,
         parent: Optional[ConfigurableRecClient],
         net_generator: NetGenerator,
-        node_opt: NodeOpt,
+        anc_node_opt: NodeOpt,
+        desc_node_opt: NodeOpt,
         train: TrainFunc,
         test: TestFunc,
         create_dataloader: DataloaderGenerator,
@@ -84,7 +88,8 @@ class RecursiveClient(ConfigurableRecClient):
         self.net_generator = net_generator
 
         # Procedures necessary for combining models, training models and testing models
-        self.node_opt = node_opt
+        self.anc_node_opt = anc_node_opt
+        self.desc_node_opt = desc_node_opt
         self.train_func = train
         self.test_func = test
         self.create_dataloader = create_dataloader
@@ -141,27 +146,40 @@ class RecursiveClient(ConfigurableRecClient):
             self.client_fn,
             test=False,  # type: ignore
         )
+        recursive_structure = cast(FitRecursiveStructure, recursive_structure)
 
         (
             parameter_generator,
+            state_generator,
             train_proxy_dataset_generator,
             train_chain_dataset_generator,
             children_res_generator_list,
+            get_residuals,
+            send_residual,
             recursive_step,
         ) = recursive_structure
 
         children_res_generator_list = cast(
             ClientFitFutureList, children_res_generator_list
         )
+        prev_round_examples, state_dict = (
+            state_generator(config.state_generator_config)
+            if state_generator is not None
+            else config.client_config.initial_state
+        )
         self.client_parameters = parameters
 
         if parameter_generator is not None:
             self.client_parameters = parameter_generator(config.parameter_config)
 
-        self.client_parameters = self.node_opt(
-            self.client_parameters, [(parameters, 1, {})], config.node_optimizer_config
+        self.client_parameters, merged_example_cnt, state_dict = self.anc_node_opt(
+            (self.client_parameters, prev_round_examples, state_dict),
+            [(parameters, config.client_config.num_examples, {})],
+            get_residuals(False),
+            config.node_optimizer_config,
         )
-        total_examples: int = 0
+        total_examples: Union[float, int] = 0
+        prev_round_examples: Optional[Union[float, int]] = None
         train_chain_examples: int = 0
         train_proxy_examples: int = 0
         children_results: List[Tuple[int, Dict]] = []
@@ -171,10 +189,23 @@ class RecursiveClient(ConfigurableRecClient):
             # Synchronise clients
             # used to set seeds for reproducibility
             config.client_config.parent_round = i
+            round_examples: Union[float, int] = 0
 
             children_results = []
 
             if config.client_config.train_children:
+                for client_id in config.client_config.root_to_leaf_residuals:
+                    send_residual(
+                        client_id,
+                        (
+                            self.client_parameters,
+                            int(prev_round_examples)
+                            if prev_round_examples is not None
+                            else merged_example_cnt,
+                            state_dict,
+                        ),
+                        False,
+                    )
                 selected_children: ClientResGeneratorList = rng.sample(
                     children_res_generator_list,
                     int(
@@ -183,19 +214,28 @@ class RecursiveClient(ConfigurableRecClient):
                     ),
                 )
 
-                self.client_parameters = self.node_opt(
-                    self.get_parameters(config.get_parameters_config),
+                (
+                    self.client_parameters,
+                    _,
+                    state_dict,
+                ) = self.desc_node_opt(
+                    (
+                        self.get_parameters(config.get_parameters_config),
+                        1,
+                        state_dict,
+                    ),
                     process_fit_results_and_accumulate_metrics(
                         children_results,
                         self.get_parameters(config.get_parameters_config),
                         config,
                         selected_children,
                     ),
+                    get_residuals(True),
                     config.node_optimizer_config,
                 )
-                total_examples += sum(
+                round_examples += sum(
                     (num_examples for num_examples, _ in children_results)
-                )
+                ) / len(children_results)
 
             (
                 self.client_parameters,
@@ -208,7 +248,7 @@ class RecursiveClient(ConfigurableRecClient):
                 mode="" if config.client_config.train_chain else None,
             )
 
-            total_examples += train_chain_examples
+            round_examples += train_chain_examples
 
             (
                 self.client_parameters,
@@ -220,12 +260,21 @@ class RecursiveClient(ConfigurableRecClient):
                 config,
                 mode="proxy" if config.client_config.train_proxy else None,
             )
-            total_examples += train_proxy_examples
+            round_examples += train_proxy_examples
+            total_examples += round_examples
+            prev_round_examples = round_examples
 
             self.client_parameters = self.get_parameters(config.get_parameters_config)
             recursive_step(
                 (self.client_parameters, config),
                 final=False,  # type: ignore
+            )
+
+        for client_id in config.client_config.leaf_to_root_residuals:
+            send_residual(
+                client_id,
+                (self.client_parameters, int(total_examples), state_dict),
+                True,
             )
 
         results: Metrics = {}
@@ -275,12 +324,13 @@ class RecursiveClient(ConfigurableRecClient):
             self, self.client_fn, test=True  # type: ignore
         )
 
+        recursive_structure = cast(EvalRecursiveStructure, recursive_structure)
+
         (
             parameter_generator,
             test_proxy_dataset_generator,
             test_chain_dataset_generator,
             children_res_generator_list,
-            _,
         ) = recursive_structure
 
         children_res_generator_list = cast(
@@ -532,7 +582,8 @@ def process_evaluate_results(
 # pylint: disable=too-many-arguments
 def get_client_fn(
     net_generator: NetGenerator,
-    node_opt: NodeOpt,
+    anc_node_opt: NodeOpt,
+    desc_node_opt: NodeOpt,
     train: TrainFunc,
     test: TestFunc,
     create_dataloader: DataloaderGenerator,
@@ -563,7 +614,8 @@ def get_client_fn(
             root=root,
             parent=parent,
             net_generator=net_generator,
-            node_opt=node_opt,
+            anc_node_opt=anc_node_opt,
+            desc_node_opt=desc_node_opt,
             train=train,
             test=test,
             create_dataloader=create_dataloader,

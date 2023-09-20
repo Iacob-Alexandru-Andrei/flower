@@ -36,7 +36,8 @@ from flwr.common.typing import GetParametersIns
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import FedAvg, Strategy
-from modified_flower.history import History
+
+from b_hfl.modified_flower.history import History
 
 FitResultsAndFailures = Tuple[
     List[Tuple[ClientProxy, FitRes]],

@@ -17,11 +17,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import gdown
-from common_types import ConfigSchemaGenerator
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
+
+from b_hfl.common_types import ConfigSchemaGenerator
 from b_hfl.schemas.client_schema import RecClientTrainConf
-from schemas.file_system_schema import (
+from b_hfl.schemas.file_system_schema import (
     ClientFolderHierarchy,
     ConfigFolderHierarchy,
     FolderHierarchy,

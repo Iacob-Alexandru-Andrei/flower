@@ -13,11 +13,11 @@ echo "=== test.sh ==="
 echo "- Start Python checks"
 
 echo "- isort: start"
-python -m isort --check-only .
+poetry run python -m isort --check-only .
 echo "- isort: done"
 
 echo "- black: start"
-poetry run python -m black  --line-length 88 --check .
+poetry run python -m black --check .
 echo "- black: done"
 
 echo "- docformatter: start"
