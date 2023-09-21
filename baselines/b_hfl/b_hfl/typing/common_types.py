@@ -70,7 +70,7 @@ FitRecursiveStructure = Tuple[
     ClientResGeneratorList,
     GetResiduals,
     SendResiduals,
-    Callable[[FitRes, NamedArg(bool, "final")], None],
+    Callable[[Tuple[NDArrays, State], NamedArg(bool, "final")], None],
 ]
 
 EvalRecursiveStructure = Tuple[

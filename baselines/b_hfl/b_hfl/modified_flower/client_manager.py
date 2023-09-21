@@ -7,6 +7,7 @@ from flwr.common.logger import log
 from flwr.server.client_manager import SimpleClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.criterion import Criterion
+from utils.utils import hash_combine
 
 
 class DeterministicClientManager(SimpleClientManager):
@@ -37,9 +38,8 @@ class DeterministicClientManager(SimpleClientManager):
         # Sample clients which meet the criterion
         cids = list(self.clients)
         # Shuffle the list of clients
-        random.seed(self.seed)
-        for _ in range(self.sample_round):
-            random.shuffle(cids)
+        random.seed(hash_combine(self.seed, self.sample_round))
+
         self.sample_round += 1
 
         available_cids = random.sample(cids, num_clients)

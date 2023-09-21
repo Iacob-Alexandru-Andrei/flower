@@ -16,8 +16,8 @@ from b_hfl.client.client import get_client_fn
 from b_hfl.client.recursive_builder import (
     get_recursive_builder as recursive_bulder_generator,
 )
-from b_hfl.client_manager import DeterministicClientManager
-from b_hfl.common_types import (
+from b_hfl.modified_flower.client_manager import DeterministicClientManager
+from b_hfl.typing.common_types import (
     ClientFN,
     ConfigSchemaGenerator,
     DataloaderGenerator,
@@ -33,13 +33,13 @@ from b_hfl.common_types import (
     TrainFunc,
     TransformType,
 )
-from b_hfl.dataset_preparation import ConfigFolderHierarchy
+from b_hfl.utils.dataset_preparation import ConfigFolderHierarchy
 from b_hfl.modified_flower.app import start_simulation
 from b_hfl.modified_flower.server import History, Server
 from b_hfl.schemas.file_system_schema import FolderHierarchy
-from b_hfl.strategy import LoggingFedAvg
-from b_hfl.task_utils import optimizer_generator_decorator
-from b_hfl.utils import (
+from b_hfl.strategies.logging_fed_avg import LoggingFedAvg
+from b_hfl.utils.task_utils import optimizer_generator_decorator
+from b_hfl.utils.utils import (
     decorate_client_fn_with_recursive_builder,
     decorate_dataset_with_transforms,
     get_save_files_every_round,
@@ -71,7 +71,7 @@ def get_fed_eval_fn(
         server_round: int, parameters: NDArrays, config: Dict
     ) -> Optional[Tuple[float, Dict]]:
         real_config = on_evaluate_config_function(server_round, root_path)
-        results = client.evaluate(parameters, real_config)
+        results = client.evaluate(parameters=parameters, config=real_config)
         loss, _, metrics = results
         return loss, metrics
 
@@ -88,7 +88,9 @@ def unroll_hierarchy(
     ret = [x]
     if recursively_train_all:
         for child in x.children:
-            ret.extend(unroll_hierarchy(child, recursively_train_all))
+            ret.extend(
+                unroll_hierarchy(x=child, recursively_train_all=recursively_train_all)
+            )
     return ret
 
 
@@ -113,15 +115,15 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     training outside of a simulation without logic duplication.
     """
     train_config_schema: ConfigSchemaGenerator = call(
-        cfg.task.data.get_train_config_schema
+        config=cfg.task.data.get_train_config_schema
     )
 
     test_config_schema: ConfigSchemaGenerator = call(
-        cfg.task.data.get_test_config_schema
+        config=cfg.task.data.get_test_config_schema
     )
 
     get_config_mapping: Callable[[FolderHierarchy], ConfigFolderHierarchy] = call(
-        cfg.task.data.get_config_mapping,
+        config=cfg.task.data.get_config_mapping,
         train_config_schema=train_config_schema,
         test_config_schema=test_config_schema,
     )
@@ -129,19 +131,19 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     config_mapping: ConfigFolderHierarchy = get_config_mapping(path_dict)
 
     call(
-        cfg.data.create_configs,
+        config=cfg.data.create_configs,
         logical_mapping=config_mapping,
     )
 
     net_generator: NetGenerator = call(cfg.task.client.get_net_generator)
 
     train: TrainFunc = optimizer_generator_decorator(
-        call(cfg.task.client.get_optimizer_generator)
-    )(call(cfg.task.client.get_train))
-    test: TestFunc = call(cfg.task.client.get_test)
+        optimizer_generator=call(cfg.task.client.get_optimizer_generator)
+    )(call(config=cfg.task.client.get_train))
+    test: TestFunc = call(config=cfg.task.client.get_test)
 
-    anc_node_opt: NodeOpt = call(cfg.client.get_anc_node_opt)
-    desc_node_opt: NodeOpt = call(cfg.client.get_desc_node_opt)
+    anc_node_opt: NodeOpt = call(config=cfg.client.get_anc_node_opt)
+    desc_node_opt: NodeOpt = call(config=cfg.client.get_desc_node_opt)
 
     create_dataloader: DataloaderGenerator = call(cfg.task.data.get_create_dataloader)
 

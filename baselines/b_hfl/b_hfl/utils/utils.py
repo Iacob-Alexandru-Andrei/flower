@@ -23,7 +23,7 @@ from torch.utils.data import Dataset
 from traitlets import Bool
 
 import wandb
-from b_hfl.common_types import (
+from b_hfl.typing.common_types import (
     ClientFN,
     DatasetLoader,
     LoadConfig,
@@ -31,7 +31,7 @@ from b_hfl.common_types import (
     RecursiveBuilder,
     TransformType,
 )
-from b_hfl.dataset_preparation import FolderHierarchy
+from b_hfl.utils.dataset_preparation import FolderHierarchy
 from b_hfl.modified_flower.server import History
 
 

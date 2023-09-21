@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import ray
-import utils
+import b_hfl.utils.utils as utils
 from flwr.common import (
     Code,
     GetPropertiesIns,
@@ -20,9 +20,9 @@ from flwr.common import (
     Status,
 )
 from torch.utils.data import Dataset
-from utils import get_parameters, get_seeded_rng, set_parameters
+from b_hfl.utils.utils import get_parameters, get_seeded_rng, set_parameters
 
-from b_hfl.common_types import (
+from b_hfl.typing.common_types import (
     ClientEvaluateFutureList,
     ClientFitFutureList,
     ClientFN,

@@ -6,7 +6,7 @@ import flwr as fl
 from flwr.common import NDArrays
 from pydantic import BaseModel
 
-from b_hfl.common_types import State
+from b_hfl.typing.common_types import State
 
 
 class ClientConfig(BaseModel):
