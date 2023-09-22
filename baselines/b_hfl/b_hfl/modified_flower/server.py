@@ -396,7 +396,7 @@ def fit_client(
 
 
 def _handle_finished_future_after_fit(
-    future: concurrent.futures.Future,  # type: ignore
+    future: concurrent.futures.Future,
     results: List[Tuple[ClientProxy, FitRes]],
     failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
 ) -> None:
@@ -456,7 +456,7 @@ def evaluate_client(
 
 
 def _handle_finished_future_after_evaluate(
-    future: concurrent.futures.Future,  # type: ignore
+    future: concurrent.futures.Future,
     results: List[Tuple[ClientProxy, EvaluateRes]],
     failures: List[Union[Tuple[ClientProxy, EvaluateRes], BaseException]],
 ) -> None:

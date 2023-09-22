@@ -1,20 +1,13 @@
+"""Parameter management for B-HFL."""
 import abc
 import os
 from abc import ABC
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
+from typing import Callable, Dict, Iterable, List, Optional, cast
 
 from flwr.common import NDArrays
-from torch.utils.data import ChainDataset, ConcatDataset, Dataset
 
-from b_hfl.typing.common_types import (
-    DatasetLoader,
-    FitRes,
-    ParametersLoader,
-    State,
-    StateLoader,
-)
-from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.typing.common_types import ParametersLoader
 
 
 class ParameterManager(ABC):
@@ -164,7 +157,7 @@ def get_parameter_generator(
 
         def parameter_generator(_config: Dict) -> NDArrays:
             return load_parameters(
-                path=parameter_file,
+                path=cast(Path, parameter_file),
                 load_parameters_file=load_params_file,
                 parameter_manager=parameter_manager,
             )

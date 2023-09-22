@@ -4,18 +4,22 @@ from typing import Callable, Dict, Iterable, List, Tuple
 from flwr.common import NDArrays
 from flwr.server.strategy.aggregate import aggregate
 
+from b_hfl.typing.common_types import FitRes, NodeOpt, State
+
 
 def get_fedavg_weighted_node_opt(
     alpha: float,
     node_aggregate: Callable[[List[Tuple[NDArrays, int]]], NDArrays] = aggregate,
-) -> Callable[[NDArrays, Iterable[Tuple[NDArrays, int, Dict]], Dict], NDArrays]:
+) -> NodeOpt:
     """Get the federated averaging strategy for node optimizer."""
 
     def fedavg_weighted_node_opt(
+        state: State,
         parameters: NDArrays,
-        child_parameters: Iterable[Tuple[NDArrays, int, Dict]],
+        child_parameters: Iterable[FitRes],
+        residuals: Iterable[FitRes],
         _config: Dict,
-    ) -> NDArrays:
+    ) -> Tuple[NDArrays, State]:
         """Federated averaging strategy for node optimizer.
 
         Parameters
@@ -38,9 +42,15 @@ def get_fedavg_weighted_node_opt(
         children_parameters = (
             node_aggregate(child_results) if child_results else parameters
         )
-        return [
-            parent_layer * alpha + child_layer * (1 - alpha)
-            for parent_layer, child_layer in zip(parameters, children_parameters)
-        ]
+        return (
+            [
+                parent_layer * alpha + child_layer * (1 - alpha)
+                for parent_layer, child_layer in zip(parameters, children_parameters)
+            ],
+            state,
+        )
 
-    return fedavg_weighted_node_opt
+    def initialise_state(_config: Dict) -> State:
+        return (0, {}, {})
+
+    return initialise_state, fedavg_weighted_node_opt

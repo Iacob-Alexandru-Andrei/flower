@@ -1,9 +1,12 @@
+"""Training and testing functions for the FEMNIST dataset."""
 from typing import Dict, Iterator, Tuple
-from torch import nn
+
 import torch
+from torch import nn
+from torch.utils.data import DataLoader
+
 from b_hfl.typing.common_types import OptimizerGenerator
 from b_hfl.utils.utils import lazy_wrapper
-from torch.utils.data import DataLoader
 
 
 @lazy_wrapper

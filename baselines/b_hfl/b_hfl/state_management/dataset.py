@@ -1,20 +1,12 @@
+"""Dataset management utilities."""
 import abc
-import os
 from abc import ABC
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union, cast
 
-from flwr.common import NDArrays
 from torch.utils.data import ChainDataset, ConcatDataset, Dataset
 
-from b_hfl.typing.common_types import (
-    DatasetLoader,
-    FitRes,
-    ParametersLoader,
-    State,
-    StateLoader,
-)
-from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.typing.common_types import DatasetLoader
 
 
 class DatasetManager(ABC):
@@ -132,7 +124,7 @@ class NoOpDatasetManager(DatasetManager):
 
     def get_dataset(self, path: Path) -> Dataset:
         """Get a dataset from the dataset manager."""
-        return None  # type: ignore
+        return cast(Dataset,None)  
 
     def unload_children_datasets(self, paths: Iterable[Path]) -> None:
         """Unload the children datasets of a given path."""
@@ -229,7 +221,7 @@ def get_dataset_generator(
 
         def dataset_generator(_config) -> Dataset:
             return process_file(
-                path=dataset_file,
+                path=cast(Path, dataset_file),
                 load_file=load_dataset_file,
                 dataset_manager=dataset_manager,
             )

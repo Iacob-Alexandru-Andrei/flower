@@ -16,7 +16,6 @@ from typing import (
 
 import torch
 from flwr.common import NDArrays
-from mypy_extensions import NamedArg
 from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
@@ -27,8 +26,9 @@ from b_hfl.schemas.client_schema import (
     RecClientRuntimeTrainConf,
 )
 
+State = Tuple[int, Dict, Any]
+
 # Everything in FitRes except for the NDArrays
-State = Tuple[int, Dict]
 
 ConfigSchemaGenerator = Callable[[], Type[BaseModel]]
 TransformType = Callable[[Any], torch.Tensor]
@@ -42,6 +42,7 @@ ParametersLoader = Callable[[Path], NDArrays]
 StateLoader = Callable[[Path], State]
 
 FitRes = Tuple[NDArrays, int, Dict]
+# Can contain the params, optional num_examples, state and metrics dict
 EvalRes = Tuple[float, int, Dict]
 
 ClientFitFuture = Tuple[
@@ -58,19 +59,20 @@ ClientEvaluateFutureList = Sequence[ClientEvaluateFuture]
 ClientResGeneratorList = Union[ClientFitFutureList, ClientEvaluateFutureList]
 
 
-GetResiduals = Callable[[NamedArg(bool, "leaf_to_root")], Iterable[FitRes]]
-SendResiduals = Callable[[Any, FitRes, NamedArg(bool, "leaf_to_root")], None]
-
+GetResiduals = Callable[[bool], Iterable[FitRes]]
+SendResiduals = Callable[[Any, FitRes, bool], None]
+RecursiveStep = Callable[[Tuple[NDArrays, State, State], bool], None]
 
 FitRecursiveStructure = Tuple[
     Optional[Callable[[Dict], NDArrays]],
+    Optional[Callable[[Dict], State]],
     Optional[Callable[[Dict], State]],
     Optional[Callable[[Dict], Dataset]],
     Optional[Callable[[Dict], Dataset]],
     ClientResGeneratorList,
     GetResiduals,
     SendResiduals,
-    Callable[[Tuple[NDArrays, State], NamedArg(bool, "final")], None],
+    RecursiveStep,
 ]
 
 EvalRecursiveStructure = Tuple[
@@ -98,7 +100,7 @@ ClientFN = Callable[
             [
                 ConfigurableRecClient,
                 Any,
-                NamedArg(bool, "test"),
+                bool,
             ],
             RecursiveStructure,
         ],
@@ -110,7 +112,7 @@ RecursiveBuilder = Callable[
     [
         ConfigurableRecClient,
         ClientFN,
-        NamedArg(bool, "test"),
+        bool,
     ],
     RecursiveStructure,
 ]
@@ -119,7 +121,16 @@ RecursiveBuilder = Callable[
 NetGenerator = Callable[[Dict], nn.Module]
 
 
-NodeOpt = Callable[[FitRes, Iterable[FitRes], Iterable[FitRes], Dict], FitRes]
+StateGenerator = Callable[[Dict], State]
+NodeOptFunction = Callable[
+    [State, NDArrays, Iterable[FitRes], Iterable[FitRes], Dict],
+    Tuple[NDArrays, State],
+]
+
+NodeOpt = Tuple[
+    StateGenerator,
+    NodeOptFunction,
+]
 
 
 OptimizerGenerator = Callable[

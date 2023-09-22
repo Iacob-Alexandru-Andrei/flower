@@ -6,8 +6,6 @@ import flwr as fl
 from flwr.common import NDArrays
 from pydantic import BaseModel
 
-from b_hfl.typing.common_types import State
-
 
 class ClientConfig(BaseModel):
     """Pydantic schema for client configuration."""
@@ -18,9 +16,7 @@ class ClientConfig(BaseModel):
 class ClientTrainConfig(ClientConfig):
     """Pydantic schema for client training configuration."""
 
-    initial_state: State
     num_rounds: int
-    num_examples: int
     fit_fraction: float
     train_children: bool
     train_chain: bool
@@ -63,6 +59,10 @@ class StateGeneratorConfig(BaseModel):
     """Pydantic schema for state generator config."""
 
 
+class StateLoaderConfig(BaseModel):
+    """Pydantic schema for state loader config."""
+
+
 class GetParametersConfig(BaseModel):
     """Pydantic schema for requiesting parameters."""
 
@@ -83,6 +83,8 @@ class RecClientRuntimeConf(BaseModel):
     """Pydantic schema for recursive client runtime configuration."""
 
     client_config: Union[ClientTrainConfig, ClientTestConfig]
+    parent_num_examples: int
+    parent_metrics: Dict
     server_round: int
     global_seed: int
     client_seed: int
@@ -90,6 +92,7 @@ class RecClientRuntimeConf(BaseModel):
     parameter_config: Dict
     net_config: Dict
     run_config: Dict
+    state_loader_config: Dict
     state_generator_config: Dict
     node_optimizer_config: Dict
     get_parameters_config: Dict
@@ -119,6 +122,7 @@ class RecClientConf(BaseModel):
     client_seed: Optional[int]
     parameter_config: Optional[ParameterConfig]
     net_config: Optional[NetConfig]
+    state_loader_config: Optional[StateLoaderConfig]
     state_generator_config: Optional[StateGeneratorConfig]
     node_optimizer_config: Optional[NodeOptConfig]
     get_parameters_config: Optional[GetParametersConfig]

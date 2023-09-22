@@ -1,1 +1,1 @@
-""" FEMNIST dataset, models and train/test loops."""
+"""FEMNIST dataset, models and train/test loops."""

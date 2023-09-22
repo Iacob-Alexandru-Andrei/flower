@@ -3,10 +3,20 @@
 import concurrent.futures
 from itertools import chain
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, Iterable, Optional, Tuple, cast
 
 from flwr.common import NDArrays
 
+from b_hfl.schemas.client_schema import (
+    ConfigurableRecClient,
+    RecClientRuntimeTestConf,
+    RecClientRuntimeTrainConf,
+)
+from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.state_management.dataset import DatasetManager, get_dataset_generator
+from b_hfl.state_management.node_state import StateManager, get_state_loader
+from b_hfl.state_management.parameters import ParameterManager, get_parameter_generator
+from b_hfl.state_management.residuals import get_residuals, send_residuals
 from b_hfl.typing.common_types import (
     ClientFN,
     ClientResGeneratorList,
@@ -21,33 +31,10 @@ from b_hfl.typing.common_types import (
     State,
     StateLoader,
 )
-from b_hfl.schemas.client_schema import (
-    ConfigurableRecClient,
-    RecClientRuntimeTestConf,
-    RecClientRuntimeTrainConf,
-)
-from b_hfl.schemas.file_system_schema import FolderHierarchy
-from b_hfl.state_management.dataset import (
-    DatasetManager,
-    get_dataset_generator,
-)
-from b_hfl.state_management.parameters import (
-    ParameterManager,
-    get_parameter_generator,
-)
-from b_hfl.state_management.node_state import (
-    StateManager,
-    get_state_generator,
-)
-from b_hfl.state_management.residuals import (
-    get_residuals,
-    send_residuals,
-)
-
 from b_hfl.utils.utils import extract_file_from_files
 
 
-# pylint: disable=too-many-arguments
+# pylint: disable=too-many-arguments,too-many-locals
 def get_recursive_builder(
     root: Path,
     path_dict: FolderHierarchy,
@@ -65,14 +52,16 @@ def get_recursive_builder(
     executor: concurrent.futures.Executor,
     train_config_schema: ConfigSchemaGenerator,
     test_config_schema: ConfigSchemaGenerator,
-    state_file_name: str = "_state",
+    anc_state_file_name: str = "_anc_state",
+    desc_state_file_name: str = "_desc_state",
 ) -> RecursiveBuilder:
     """Generate a recursive builder for a given file hierarchy.
 
     This is recursively caled within the inner function for each child of a given node.
     """
     cur_round: int = 0
-    state_file_name = f"{parameters_file_name}{state_file_name}"
+    anc_state_file_name = f"{parameters_file_name}{anc_state_file_name}"
+    desc_state_file_name = f"{parameters_file_name}{desc_state_file_name}"
 
     def recursive_builder(
         current_client: ConfigurableRecClient,
@@ -94,34 +83,46 @@ def get_recursive_builder(
             files=path_dict.path, file_type=parameters_file_name
         )
 
-        state_file: Optional[Path] = extract_file_from_files(
-            files=path_dict.path, file_type=state_file_name
+        anc_state_file: Optional[Path] = extract_file_from_files(
+            files=path_dict.path, file_type=anc_state_file_name
+        )
+
+        desc_state_file: Optional[Path] = extract_file_from_files(
+            files=path_dict.path, file_type=anc_state_file_name
         )
 
         def recursive_step(
-            params_and_state: Tuple[NDArrays, State], final: bool
+            params_and_state: Tuple[NDArrays, State, State], final: bool
         ) -> None:
             nonlocal cur_round
             cur_round += 1
 
             if final:
-                parameters, state = params_and_state
+                parameters, anc_state, desc_state = params_and_state
                 parameters_save_name = (
                     path_dict.path / f"{parameters_file_name}{parameters_ext}"
                     if parameter_file is None
                     else parameter_file
                 )
 
-                state_save_name = (
-                    path_dict.path / state_file_name
-                    if state_file is None
-                    else state_file
+                anc_state_save_name = (
+                    path_dict.path / anc_state_file_name
+                    if anc_state_file is None
+                    else anc_state_file
                 )
+
+                desc_state_save_name = (
+                    path_dict.path / desc_state_file_name
+                    if desc_state_file is None
+                    else desc_state_file
+                )
+
                 parameter_manager.set_parameters(
                     path=parameters_save_name, parameters=parameters
                 )
 
-                state_manager.set_state(path=state_save_name, state=state)
+                state_manager.set_state(path=anc_state_save_name, state=anc_state)
+                state_manager.set_state(path=desc_state_save_name, state=desc_state)
 
                 if chain_dataset_file is not None:
                     dataset_manager.unload_chain_dataset(chain_dataset_file)
@@ -149,7 +150,10 @@ def get_recursive_builder(
                 )
 
                 dataset_manager.unload_children_datasets(
-                    chain(children_chain_dataset_files, children_dataset_files)
+                    chain(
+                        cast(Iterable[Path], children_chain_dataset_files),
+                        cast(Iterable[Path], children_dataset_files),
+                    )
                 )
 
                 cur_round = 0
@@ -159,46 +163,7 @@ def get_recursive_builder(
                     parameter_manager.cleanup()
                     state_manager.cleanup()
 
-        if not test:
-            return (
-                get_parameter_generator(
-                    parameter_file=parameter_file,
-                    load_params_file=load_params_file,
-                    parameter_manager=parameter_manager,
-                ),
-                get_state_generator(
-                    state_file=state_file,
-                    load_state_file=load_state_file,
-                    state_manager=state_manager,
-                ),
-                get_dataset_generator(
-                    dataset_file=dataset_file,
-                    load_dataset_file=load_dataset_file,
-                    dataset_manager=dataset_manager,
-                ),
-                get_dataset_generator(
-                    dataset_file=chain_dataset_file,
-                    load_dataset_file=load_dataset_file,
-                    dataset_manager=dataset_manager,
-                ),
-                _get_child_generators(
-                    current_client=current_client, client_fn=client_fn, test=test
-                ),
-                lambda leaf_to_root: get_residuals(
-                    residuals_manager=residuals_manager,
-                    path_dict=path_dict,
-                    leaf_to_root=leaf_to_root,
-                ),
-                lambda send_to, residual, leaf_to_root: send_residuals(
-                    residuals_manager=residuals_manager,
-                    path_dict=path_dict,
-                    send_to=send_to,
-                    residual=residual,
-                    leaf_to_root=leaf_to_root,
-                ),
-                recursive_step,
-            )
-        else:
+        if test:
             return (
                 get_parameter_generator(
                     parameter_file=parameter_file,
@@ -219,6 +184,40 @@ def get_recursive_builder(
                     current_client=current_client, client_fn=client_fn, test=test
                 ),
             )
+
+        return (
+            get_parameter_generator(
+                parameter_file=parameter_file,
+                load_params_file=load_params_file,
+                parameter_manager=parameter_manager,
+            ),
+            get_state_loader(
+                state_file=anc_state_file,
+                load_state_file=load_state_file,
+                state_manager=state_manager,
+            ),
+            get_state_loader(
+                state_file=anc_state_file,
+                load_state_file=load_state_file,
+                state_manager=state_manager,
+            ),
+            get_dataset_generator(
+                dataset_file=dataset_file,
+                load_dataset_file=load_dataset_file,
+                dataset_manager=dataset_manager,
+            ),
+            get_dataset_generator(
+                dataset_file=chain_dataset_file,
+                load_dataset_file=load_dataset_file,
+                dataset_manager=dataset_manager,
+            ),
+            _get_child_generators(
+                current_client=current_client, client_fn=client_fn, test=test
+            ),
+            _get_residuals,
+            _send_residuals,
+            recursive_step,
+        )
 
     def _get_child_generators(
         current_client: ConfigurableRecClient, client_fn: ClientFN, test: bool
@@ -343,6 +342,22 @@ def get_recursive_builder(
 
         return lambda params, conf, parent_conf: executor.submit(
             evaluate_client, params, conf, parent_conf
+        )
+
+    def _get_residuals(leaf_to_root: bool) -> Iterable[FitRes]:
+        return get_residuals(
+            residuals_manager=residuals_manager,
+            path_dict=path_dict,
+            leaf_to_root=leaf_to_root,
+        )
+
+    def _send_residuals(send_to: Path, residual: FitRes, leaf_to_root: bool) -> None:
+        return send_residuals(
+            residuals_manager=residuals_manager,
+            path_dict=path_dict,
+            send_to=send_to,
+            residual=residual,
+            leaf_to_root=leaf_to_root,
         )
 
     return recursive_builder

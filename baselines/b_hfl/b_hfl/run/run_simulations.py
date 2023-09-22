@@ -4,7 +4,7 @@ Experiments execute hierarchically based on the folder structure of the data fol
 """
 import concurrent.futures
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, cast
 
 import flwr as fl
 from flwr.common import NDArrays, Parameters
@@ -16,7 +16,12 @@ from b_hfl.client.client import get_client_fn
 from b_hfl.client.recursive_builder import (
     get_recursive_builder as recursive_bulder_generator,
 )
+from b_hfl.modified_flower.app import start_simulation
 from b_hfl.modified_flower.client_manager import DeterministicClientManager
+from b_hfl.modified_flower.server import History, Server
+from b_hfl.schemas.client_schema import ConfigurableRecClient
+from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.strategies.logging_fed_avg import LoggingFedAvg
 from b_hfl.typing.common_types import (
     ClientFN,
     ConfigSchemaGenerator,
@@ -34,10 +39,6 @@ from b_hfl.typing.common_types import (
     TransformType,
 )
 from b_hfl.utils.dataset_preparation import ConfigFolderHierarchy
-from b_hfl.modified_flower.app import start_simulation
-from b_hfl.modified_flower.server import History, Server
-from b_hfl.schemas.file_system_schema import FolderHierarchy
-from b_hfl.strategies.logging_fed_avg import LoggingFedAvg
 from b_hfl.utils.task_utils import optimizer_generator_decorator
 from b_hfl.utils.utils import (
     decorate_client_fn_with_recursive_builder,
@@ -47,6 +48,7 @@ from b_hfl.utils.utils import (
 )
 
 
+# pylint: disable=too-many-arguments
 def get_fed_eval_fn(
     root_path: Path,
     client_fn: ClientFN,
@@ -188,7 +190,7 @@ def build_hydra_client_fn_and_recursive_builder_generator(
 
         def get_client_recursive_builder(x: FolderHierarchy) -> RecursiveBuilder:
             return recursive_bulder_generator(
-                root=x.path,  # type: ignore
+                root=x.path,
                 path_dict=x,
                 load_dataset_file=load_dataset_file,
                 dataset_manager=call(cfg.state.get_dataset_manager),
@@ -197,11 +199,16 @@ def build_hydra_client_fn_and_recursive_builder_generator(
                     cfg.state.get_parameter_manager,
                     save_parameters_to_file=call(cfg.state.get_save_parameters_to_file),
                 ),
+                load_state_file=load_state_file,
+                state_manager=state_manager,
+                residuals_manager=residuals_manager,
                 on_fit_config_fn=on_fit_config_function,
                 on_evaluate_config_fn=on_evaluate_config_function,
                 parameters_file_name=parameters_file_name,
                 parameters_ext=cfg.state.parameters_extension,
                 executor=executor,
+                train_config_schema=train_config_schema,
+                test_config_schema=test_config_schema,
             )
 
         return get_client_recursive_builder
@@ -228,6 +235,8 @@ def get_run_fed_simulation(
     client_output_directory: Path,
     initial_parameters: Parameters,
     executor: concurrent.futures.Executor,
+    train_config_schema: ConfigSchemaGenerator,
+    test_config_schema: ConfigSchemaGenerator,
 ) -> Callable[[FolderHierarchy], History]:
     """Get the function to run a federated simulation."""
 
@@ -239,9 +248,12 @@ def get_run_fed_simulation(
         )
 
         wrapped_client_fn: Callable[
-            [str], fl.client.Client
+            [str], ConfigurableRecClient
         ] = decorate_client_fn_with_recursive_builder(
-            get_client_recursive_builder, path_dict
+            get_client_recursive_builder=get_client_recursive_builder,
+            path_dict=path_dict,
+            train_config_schema=train_config_schema,
+            test_config_schema=test_config_schema,
         )(
             client_fn
         )
@@ -296,7 +308,7 @@ def get_run_fed_simulation(
         )
 
         return start_simulation(
-            client_fn=wrapped_client_fn,
+            client_fn=cast(Callable[[str], fl.client.Client], wrapped_client_fn),
             num_clients=cfg.fed.num_total_clients,
             client_resources={
                 "num_cpus": cfg.fed.cpus_per_client,
@@ -323,6 +335,8 @@ def run_fed_simulations_recursive(
     initial_parameters: Parameters,
     recursively_fed_all: bool,
     executor: concurrent.futures.Executor,
+    train_config_schema: ConfigSchemaGenerator,
+    test_config_schema: ConfigSchemaGenerator,
 ) -> List[Tuple[Path, FolderHierarchy, History]]:
     """Run federated simulations recursively.
 
@@ -339,6 +353,8 @@ def run_fed_simulations_recursive(
         client_output_directory=client_output_directory,
         initial_parameters=initial_parameters,
         executor=executor,
+        train_config_schema=train_config_schema,
+        test_config_schema=test_config_schema,
     )
 
     histories: List[Tuple[Path, FolderHierarchy, History]] = []

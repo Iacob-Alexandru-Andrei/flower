@@ -1,1 +1,1 @@
-""" State management module."""
+"""State management module."""

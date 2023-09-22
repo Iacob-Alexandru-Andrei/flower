@@ -12,7 +12,6 @@ from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import flwr as fl
 import matplotlib.pyplot as plt
 import numpy as np
 import ray
@@ -23,8 +22,11 @@ from torch.utils.data import Dataset
 from traitlets import Bool
 
 import wandb
+from b_hfl.modified_flower.server import History
+from b_hfl.schemas.client_schema import ConfigurableRecClient
 from b_hfl.typing.common_types import (
     ClientFN,
+    ConfigSchemaGenerator,
     DatasetLoader,
     LoadConfig,
     ParametersLoader,
@@ -32,7 +34,6 @@ from b_hfl.typing.common_types import (
     TransformType,
 )
 from b_hfl.utils.dataset_preparation import FolderHierarchy
-from b_hfl.modified_flower.server import History
 
 
 def get_parameters(net: nn.Module) -> NDArrays:
@@ -60,7 +61,9 @@ def lazy_wrapper(x: Callable) -> Callable[[], Any]:
 def decorate_client_fn_with_recursive_builder(
     get_client_recursive_builder: Callable[[FolderHierarchy], RecursiveBuilder],
     path_dict: FolderHierarchy,
-) -> Callable[[ClientFN], Callable[[str], fl.client.Client]]:
+    train_config_schema: ConfigSchemaGenerator,
+    test_config_schema: ConfigSchemaGenerator,
+) -> Callable[[ClientFN], Callable[[str], ConfigurableRecClient]]:
     """Decorate a client function with a recursive builder."""
     root: Path = path_dict.path
 
@@ -68,13 +71,19 @@ def decorate_client_fn_with_recursive_builder(
 
     def client_fn_wrapper(
         client_fn: ClientFN,
-    ) -> Callable[[str], fl.client.Client]:
-        def wrap_client_fn(cid: str) -> fl.client.Client:
+    ) -> Callable[[str], ConfigurableRecClient]:
+        def wrap_client_fn(cid: str) -> ConfigurableRecClient:
             nonlocal path_dict
 
             return client_fn(
-                cid, path_dict.path, root, None, recursive_builder
-            )  # type: ignore
+                cid,
+                path_dict.path,
+                root,
+                None,
+                train_config_schema,
+                test_config_schema,
+                recursive_builder,
+            )
 
         return wrap_client_fn
 

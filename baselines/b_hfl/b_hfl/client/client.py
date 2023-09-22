@@ -4,12 +4,10 @@ Please overwrite `flwr.client.NumPyClient` or `flwr.client.Client` and create a 
 to instantiate your client.
 """
 
-import concurrent.futures
 from pathlib import Path
-from typing import Callable, Dict, Generator, List, Optional, Tuple, Union, cast
+from typing import Callable, Dict, List, Optional, Tuple, Union, cast
 
 import ray
-import b_hfl.utils.utils as utils
 from flwr.common import (
     Code,
     GetPropertiesIns,
@@ -20,13 +18,21 @@ from flwr.common import (
     Status,
 )
 from torch.utils.data import Dataset
-from b_hfl.utils.utils import get_parameters, get_seeded_rng, set_parameters
 
+import b_hfl.utils.utils as utils
+from b_hfl.client.async_collect import (
+    process_evaluate_results,
+    process_fit_results_and_accumulate_metrics,
+)
+from b_hfl.schemas.client_schema import (
+    ConfigurableRecClient,
+    RecClientRuntimeTestConf,
+    RecClientRuntimeTrainConf,
+)
 from b_hfl.typing.common_types import (
     ClientEvaluateFutureList,
     ClientFitFutureList,
     ClientFN,
-    ClientResGeneratorList,
     ConfigSchemaGenerator,
     DataloaderGenerator,
     EvalRecursiveStructure,
@@ -40,11 +46,7 @@ from b_hfl.typing.common_types import (
     TestFunc,
     TrainFunc,
 )
-from b_hfl.schemas.client_schema import (
-    ConfigurableRecClient,
-    RecClientRuntimeTestConf,
-    RecClientRuntimeTrainConf,
-)
+from b_hfl.utils.utils import get_parameters, get_seeded_rng, set_parameters
 
 
 class RecursiveClient(ConfigurableRecClient):
@@ -88,8 +90,8 @@ class RecursiveClient(ConfigurableRecClient):
         self.net_generator = net_generator
 
         # Procedures necessary for combining models, training models and testing models
-        self.anc_node_opt = anc_node_opt
-        self.desc_node_opt = desc_node_opt
+        self.anc_state_generator, self.anc_node_opt = anc_node_opt
+        self.desc_state_generator, self.desc_node_opt = desc_node_opt
         self.train_func = train
         self.test_func = test
         self.create_dataloader = create_dataloader
@@ -118,7 +120,7 @@ class RecursiveClient(ConfigurableRecClient):
             {"true_id": self.true_id, "cid": self.cid},  # type: ignore
         )
 
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,arguments-differ
     def fit(
         self,
         parameters: NDArrays,
@@ -142,15 +144,14 @@ class RecursiveClient(ConfigurableRecClient):
         )
 
         recursive_structure: RecursiveStructure = self.recursive_builder(
-            self,
-            self.client_fn,
-            test=False,  # type: ignore
+            self, self.client_fn, False
         )
         recursive_structure = cast(FitRecursiveStructure, recursive_structure)
 
         (
             parameter_generator,
-            state_generator,
+            anc_state_loader,
+            desc_state_loader,
             train_proxy_dataset_generator,
             train_chain_dataset_generator,
             children_res_generator_list,
@@ -162,34 +163,63 @@ class RecursiveClient(ConfigurableRecClient):
         children_res_generator_list = cast(
             ClientFitFutureList, children_res_generator_list
         )
-        prev_round_examples, state_dict = (
-            state_generator(config.state_generator_config)
-            if state_generator is not None
-            else config.client_config.initial_state
+        anc_state = (
+            anc_state_loader(config.state_loader_config)
+            if anc_state_loader is not None
+            else self.anc_state_generator(config.state_generator_config)
         )
+
+        desc_state = (
+            desc_state_loader(config.state_loader_config)
+            if desc_state_loader is not None
+            else self.desc_state_generator(config.state_generator_config)
+        )
+
         self.client_parameters = parameters
 
         if parameter_generator is not None:
             self.client_parameters = parameter_generator(config.parameter_config)
 
-        self.client_parameters, merged_example_cnt, state_dict = self.anc_node_opt(
-            (self.client_parameters, prev_round_examples, state_dict),
-            [(parameters, config.client_config.num_examples, {})],
+        self.client_parameters, anc_state = self.anc_node_opt(
+            anc_state,
+            self.client_parameters,
+            [(parameters, config.parent_num_examples, config.parent_metrics)],
             get_residuals(False),
             config.node_optimizer_config,
         )
+
         total_examples: Union[float, int] = 0
-        prev_round_examples: Optional[Union[float, int]] = None
+        prev_round_examples: int = 0
+
         train_chain_examples: int = 0
         train_proxy_examples: int = 0
         children_results: List[Tuple[int, Dict]] = []
         train_proxy_metrics: Dict = {}
         train_chain_metrics: Dict = {}
+
+        merged_prev_metrics = {
+            "examples": {
+                "round": 0,
+                "chain": train_chain_examples,
+                "proxy": train_proxy_examples,
+            },
+            "metrics": {
+                "children": children_results,
+                "chain": train_chain_metrics,
+                "proxy": train_proxy_metrics,
+            },
+        }
+
         for i in range(config.client_config.num_rounds):
             # Synchronise clients
             # used to set seeds for reproducibility
+            desc_state = (prev_round_examples, merged_prev_metrics, desc_state[-1])
+
             config.client_config.parent_round = i
-            round_examples: Union[float, int] = 0
+            config.parent_num_examples = prev_round_examples
+            config.parent_metrics = merged_prev_metrics
+
+            round_examples: int = 0
 
             children_results = []
 
@@ -199,14 +229,12 @@ class RecursiveClient(ConfigurableRecClient):
                         client_id,
                         (
                             self.client_parameters,
-                            int(prev_round_examples)
-                            if prev_round_examples is not None
-                            else merged_example_cnt,
-                            state_dict,
+                            int(prev_round_examples),
+                            merged_prev_metrics,
                         ),
                         False,
                     )
-                selected_children: ClientResGeneratorList = rng.sample(
+                selected_children: ClientFitFutureList = rng.sample(
                     children_res_generator_list,
                     int(
                         config.client_config.fit_fraction
@@ -214,16 +242,9 @@ class RecursiveClient(ConfigurableRecClient):
                     ),
                 )
 
-                (
-                    self.client_parameters,
-                    _,
-                    state_dict,
-                ) = self.desc_node_opt(
-                    (
-                        self.get_parameters(config.get_parameters_config),
-                        1,
-                        state_dict,
-                    ),
+                self.client_parameters, desc_state = self.desc_node_opt(
+                    desc_state,
+                    self.get_parameters(config.get_parameters_config),
                     process_fit_results_and_accumulate_metrics(
                         children_results,
                         self.get_parameters(config.get_parameters_config),
@@ -233,9 +254,10 @@ class RecursiveClient(ConfigurableRecClient):
                     get_residuals(True),
                     config.node_optimizer_config,
                 )
-                round_examples += sum(
-                    (num_examples for num_examples, _ in children_results)
-                ) / len(children_results)
+                round_examples += int(
+                    sum((num_examples for num_examples, _ in children_results))
+                    / len(children_results)
+                )
 
             (
                 self.client_parameters,
@@ -264,16 +286,29 @@ class RecursiveClient(ConfigurableRecClient):
             total_examples += round_examples
             prev_round_examples = round_examples
 
+            merged_prev_metrics = {
+                "examples": {
+                    "round": round_examples,
+                    "chain": train_chain_examples,
+                    "proxy": train_proxy_examples,
+                },
+                "metrics": {
+                    "children": children_results,
+                    "chain": train_chain_metrics,
+                    "proxy": train_proxy_metrics,
+                },
+            }
+
             self.client_parameters = self.get_parameters(config.get_parameters_config)
             recursive_step(
-                (self.client_parameters, config),
-                final=False,  # type: ignore
+                (self.client_parameters, anc_state, desc_state),
+                False,
             )
 
         for client_id in config.client_config.leaf_to_root_residuals:
             send_residual(
                 client_id,
-                (self.client_parameters, int(total_examples), state_dict),
+                (self.client_parameters, int(total_examples), merged_prev_metrics),
                 True,
             )
 
@@ -292,14 +327,14 @@ class RecursiveClient(ConfigurableRecClient):
         results.update(train_chain_metrics)
         results.update(train_proxy_metrics)
 
-        recursive_step((self.client_parameters, config), final=True)  # type: ignore
+        recursive_step((self.client_parameters, anc_state, desc_state), True)
         return (
             self.get_parameters(config.get_parameters_config),
             int(float(total_examples) / config.client_config.num_rounds),
             results,
         )
 
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,arguments-differ
     def evaluate(
         self, parameters: NDArrays, in_config: Union[Dict, RecClientRuntimeTestConf]
     ) -> EvalRes:
@@ -321,7 +356,7 @@ class RecursiveClient(ConfigurableRecClient):
         )
 
         recursive_structure: RecursiveStructure = self.recursive_builder(
-            self, self.client_fn, test=True  # type: ignore
+            self, self.client_fn, True
         )
 
         recursive_structure = cast(EvalRecursiveStructure, recursive_structure)
@@ -535,48 +570,6 @@ def remote_test(
         )
 
     return 0.0, 0, {}
-
-
-def process_fit_results_and_accumulate_metrics(
-    result_metrics: List,
-    parameters: NDArrays,
-    parent_conf: RecClientRuntimeTrainConf,
-    fit_res_generators: ClientFitFutureList,
-) -> Generator[FitRes, None, None]:
-    """Fit the children and accumulate the metrics."""
-    futures = [
-        child_gen(parameters, conf, parent_conf)
-        for child_gen, conf in fit_res_generators
-    ]
-    while futures:
-        done, _ = concurrent.futures.wait(
-            futures, return_when=concurrent.futures.FIRST_COMPLETED
-        )
-        for future in done:
-            futures.remove(future)
-            future_result = future.result()
-            result_metrics.append(future_result[1:])
-            yield future_result
-
-
-def process_evaluate_results(
-    parameters: NDArrays,
-    parent_conf: RecClientRuntimeTestConf,
-    eval_res_generator: ClientEvaluateFutureList,
-) -> Generator[EvalRes, None, None]:
-    """Evaluate the children."""
-    futures = [
-        child_gen(parameters, conf, parent_conf)
-        for child_gen, conf in eval_res_generator
-    ]
-    while futures:
-        done, _ = concurrent.futures.wait(
-            futures, return_when=concurrent.futures.FIRST_COMPLETED
-        )
-        for future in done:
-            futures.remove(future)
-            future_result = future.result()
-            yield future_result
 
 
 # pylint: disable=too-many-arguments

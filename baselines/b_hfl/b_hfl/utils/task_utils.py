@@ -1,7 +1,7 @@
 """Train/eval functions for a given dataset/task."""
 
 from collections import OrderedDict
-from typing import Any, Callable, Dict, Iterator, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 import numpy as np
 import torch

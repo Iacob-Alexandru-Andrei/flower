@@ -66,7 +66,7 @@ class LoggingFedAvg(FedAvg):
                     client,
                     FitIns(
                         parameters,
-                        self.on_fit_config_fn(server_round, true_id),  # type: ignore
+                        self.on_fit_config_fn(server_round, true_id),   # type: ignore
                     ),
                 )
                 for client, true_id in zip(clients, client_true_ids)

@@ -18,7 +18,6 @@ from hydra.utils import call
 from omegaconf import DictConfig, OmegaConf
 
 import wandb
-from b_hfl.typing.common_types import RecursiveBuilder
 from b_hfl.modified_flower.server import History
 from b_hfl.run.run_simulations import (
     build_hydra_client_fn_and_recursive_builder_generator,
@@ -26,6 +25,7 @@ from b_hfl.run.run_simulations import (
     train_and_evaluate_optimal_models_from_hierarchy,
 )
 from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.typing.common_types import RecursiveBuilder
 from b_hfl.utils.utils import FileSystemManager, process_histories, wandb_init
 
 
@@ -168,6 +168,8 @@ def main(cfg: DictConfig) -> None:
                         initial_parameters=initial_parameters,
                         recursively_fed_all=cfg.recursively_fed_simulate_all,
                         executor=executor,
+                        train_config_schema=train_config_schema,
+                        test_config_schema=test_config_schema,
                     )
                 )
 

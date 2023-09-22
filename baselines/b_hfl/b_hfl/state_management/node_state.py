@@ -1,20 +1,11 @@
+"""State management for node optimizers."""
 import abc
 import os
 from abc import ABC
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
+from typing import Callable, Dict, Iterable, List, Optional, cast
 
-from flwr.common import NDArrays
-from torch.utils.data import ChainDataset, ConcatDataset, Dataset
-
-from b_hfl.typing.common_types import (
-    DatasetLoader,
-    FitRes,
-    ParametersLoader,
-    State,
-    StateLoader,
-)
-from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.typing.common_types import State, StateLoader
 
 
 class StateManager(ABC):
@@ -134,7 +125,7 @@ def get_eviction_state_manager(
 
 def load_state(
     path: Path,
-    load_state: Callable[[Path], State],
+    load_state_file: Callable[[Path], State],
     state_manager: StateManager,
 ) -> State:
     """Load a set of parameters from a file if it not already in manager.
@@ -147,12 +138,12 @@ def load_state(
     if path in state_manager:
         return state_manager.get_state(path)
 
-    state: State = load_state(path)
+    state: State = load_state_file(path)
     state_manager.set_state(path, state)
     return state
 
 
-def get_state_generator(
+def get_state_loader(
     state_file: Optional[Path],
     load_state_file: StateLoader,
     state_manager: StateManager,
@@ -160,11 +151,13 @@ def get_state_generator(
     """Get a state generator function."""
     if state_file is not None:
 
-        def state_generator(_config: Dict) -> State:
+        def state_loader(_config: Dict) -> State:
             return load_state(
-                path=state_file, load_state=load_state_file, state_manager=state_manager
+                path=cast(Path, state_file),
+                load_state_file=load_state_file,
+                state_manager=state_manager,
             )
 
-        return state_generator
+        return state_loader
 
     return None

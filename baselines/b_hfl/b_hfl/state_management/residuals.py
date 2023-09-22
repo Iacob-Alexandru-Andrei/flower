@@ -1,20 +1,10 @@
-import abc
-import os
-from abc import ABC
+"""Residuals state management for residual connections between clients."""
+
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
+from typing import Any, Dict, Iterable
 
-from flwr.common import NDArrays
-from torch.utils.data import ChainDataset, ConcatDataset, Dataset
-
-from b_hfl.typing.common_types import (
-    DatasetLoader,
-    FitRes,
-    ParametersLoader,
-    State,
-    StateLoader,
-)
 from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.typing.common_types import FitRes
 
 
 def get_residuals(
@@ -23,10 +13,10 @@ def get_residuals(
     leaf_to_root: bool,
 ) -> Iterable[FitRes]:
     """Get the residuals for a given client."""
-    id = path_dict.path / "leaf_to_root" / f"{leaf_to_root}"
-    if id not in residuals_manager:
-        residuals_manager[id] = {}
-    return residuals_manager[id].values()
+    client_id = path_dict.path / "leaf_to_root" / f"{leaf_to_root}"
+    if client_id not in residuals_manager:
+        residuals_manager[client_id] = {}
+    return residuals_manager[client_id].values()
 
 
 def send_residuals(

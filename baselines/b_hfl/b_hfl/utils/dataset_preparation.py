@@ -20,13 +20,13 @@ import gdown
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
 
-from b_hfl.typing.common_types import ConfigSchemaGenerator
 from b_hfl.schemas.client_schema import RecClientTrainConf
 from b_hfl.schemas.file_system_schema import (
     ClientFolderHierarchy,
     ConfigFolderHierarchy,
     FolderHierarchy,
 )
+from b_hfl.typing.common_types import ConfigSchemaGenerator
 
 # @hydra.main(config_path="conf", config_name="base", version_base=None)
 # def download_and_preprocess(cfg: DictConfig) -> None:
@@ -347,7 +347,7 @@ def get_uniform_configs(
             if isinstance(new_fit_config, RecClientTrainConf):
                 new_fit_config.client_config.train_chain = True
     children = [
-        get_uniform_configs(child, on_fit_configs, on_evaluate_configs)  # type: ignore
+        get_uniform_configs(child, on_fit_configs, on_evaluate_configs)
         for child in path_dict.children
     ]
     return ConfigFolderHierarchy(

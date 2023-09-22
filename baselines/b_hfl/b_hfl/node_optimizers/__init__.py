@@ -1,1 +1,1 @@
-""" Strategies to use at a client level."""
+"""Strategies to use at a client level."""
