@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from b_hfl.schemas.client_schema import (
+from b_hfl.schema.client_schema import (
     ConfigurableRecClient,
     RecClientRuntimeTestConf,
     RecClientRuntimeTrainConf,

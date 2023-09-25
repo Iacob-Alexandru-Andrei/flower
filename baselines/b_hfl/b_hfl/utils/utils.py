@@ -6,9 +6,11 @@ results, plotting.
 """
 import json
 import os
+import pickle
 import random
 import shutil
 from collections import OrderedDict, defaultdict
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -23,7 +25,7 @@ from traitlets import Bool
 
 import wandb
 from b_hfl.modified_flower.server import History
-from b_hfl.schemas.client_schema import ConfigurableRecClient
+from b_hfl.schema.client_schema import ConfigurableRecClient
 from b_hfl.typing.common_types import (
     ClientFN,
     ConfigSchemaGenerator,
@@ -31,6 +33,7 @@ from b_hfl.typing.common_types import (
     LoadConfig,
     ParametersLoader,
     RecursiveBuilder,
+    State,
     TransformType,
 )
 from b_hfl.utils.dataset_preparation import FolderHierarchy
@@ -133,6 +136,20 @@ def save_parameters_to_file(path: Path, parameters: NDArrays) -> None:
 
 
 @lazy_wrapper
+def save_generic_state_to_file(path: Path, state: State) -> None:
+    """Save state to a file for arbitrary objects."""
+    with open(path, "wb") as f:
+        pickle.dump(state, f)
+
+
+@lazy_wrapper
+def load_generic_state_file(path: Path) -> State:
+    """Save state to a file for arbitrary objects."""
+    with open(path, "wb") as f:
+        return pickle.load(f)
+
+
+@lazy_wrapper
 def load_parameters_file(path: Path) -> NDArrays:
     """Load parameters from a file."""
     if path.suffix == ".npy" or path.suffix == ".npz" or path.suffix == ".np":
@@ -190,8 +207,7 @@ def get_config(config_name: str, seed: int) -> Callable[[int, Path], Dict]:
             client_seed: int = seed_generator.randint(0, 2**32 - 1)
             with open(true_id / f"{config_name}_config.json") as f:
                 configs: List[Dict] = json.load(f)
-                for i, config in enumerate(configs):
-                    config["server_round"] = i
+                for _i, config in enumerate(configs):
                     config["global_seed"] = seed
                     config["client_seed"] = client_seed
                 with open(true_id / f"{config_name}_config_runtime.json", "w") as f:
@@ -201,9 +217,13 @@ def get_config(config_name: str, seed: int) -> Callable[[int, Path], Dict]:
             configs = configs_dict[true_id]
 
         if len(configs) <= server_round:
-            return configs[-1]
+            to_ret = configs[-1]
+        else:
+            to_ret = configs[server_round]
 
-        return configs[server_round]
+        to_ret = deepcopy(to_ret)
+        to_ret["server_round"] = server_round
+        return to_ret
 
     return file_on_fit_config_fn
 

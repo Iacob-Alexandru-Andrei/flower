@@ -1,0 +1,15 @@
+---
+network: CNN
+
+get_net_generator:
+  _target_: task.femnist.models.get_generate_model
+  network: ${task.client.network}
+
+get_test:
+  _target_: task.femnist.train.test_femnist
+
+get_optimizer_generator:
+  _target_: task.femnist.train.optimizer_generator_femnist
+
+get_train:
+  _target_: task.task_utils.train_femnist

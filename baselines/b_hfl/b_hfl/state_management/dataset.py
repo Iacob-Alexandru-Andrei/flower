@@ -124,7 +124,7 @@ class NoOpDatasetManager(DatasetManager):
 
     def get_dataset(self, path: Path) -> Dataset:
         """Get a dataset from the dataset manager."""
-        return cast(Dataset,None)  
+        return cast(Dataset, None)
 
     def unload_children_datasets(self, paths: Iterable[Path]) -> None:
         """Unload the children datasets of a given path."""

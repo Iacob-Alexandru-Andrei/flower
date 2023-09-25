@@ -5,7 +5,7 @@ from typing import Generator, List
 
 from flwr.common import NDArrays
 
-from b_hfl.schemas.client_schema import (
+from b_hfl.schema.client_schema import (
     RecClientRuntimeTestConf,
     RecClientRuntimeTrainConf,
 )

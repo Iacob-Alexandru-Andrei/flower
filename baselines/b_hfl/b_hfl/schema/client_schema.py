@@ -16,6 +16,8 @@ class ClientConfig(BaseModel):
 class ClientTrainConfig(ClientConfig):
     """Pydantic schema for client training configuration."""
 
+    parent_num_examples: Optional[int]
+    parent_metrics: Optional[Dict]
     num_rounds: int
     fit_fraction: float
     train_children: bool
@@ -83,8 +85,6 @@ class RecClientRuntimeConf(BaseModel):
     """Pydantic schema for recursive client runtime configuration."""
 
     client_config: Union[ClientTrainConfig, ClientTestConfig]
-    parent_num_examples: int
-    parent_metrics: Dict
     server_round: int
     global_seed: int
     client_seed: int

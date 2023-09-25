@@ -1,41 +1,44 @@
-
+---
 # for "get_eviction_parameter_manager"
 parameters_limit: 1000
 parameters_eviction_proportion: 0.5
 
-to_clean:
-  - "parameters"
-  - "history"
-  - "config"
+# for "get_eviction_state_manager"
+node_state_limit: 1000
+node_state_eviction_proportion: 0.5
 
+# saving parameters
 save_frequency: 100
-
-save_per_round:
-  - "parameters"
-
-to_save_once:
-  - "parameters"
-  - "config"
-  - "train"
-  - "test"
-  - "history"
+to_clean: [parameters, history, config]
+save_per_round: [parameters]
+to_save_once: [parameters, config, train, test, history]
 
 get_recursive_builder:
-  _target_: "client.recursive_builder.get_recursive_builder_wrapper"
-  
-get_dataset_manager: 
-  _target_: "state_management.get_noop_dataset_manager"
+  _target_: client.recursive_builder.get_recursive_builder_wrapper
+
+get_dataset_manager:
+  _target_: state_management.dataset.get_noop_dataset_manager
 
 get_load_parameters_file:
-  _target_: "utils.load_parameters_file"
+  _target_: utils.utils.load_parameters_file
 
 get_save_parameters_to_file:
-  _target_: "utils.save_parameters_to_file"
+  _target_: utils.utils.save_parameters_to_file
 
-parameters_extension: ".npz"
+parameters_extension: .npz
 
 get_parameter_manager:
-  _target_: "state_management.get_eviction_parameter_manager"
+  _target_: state_management.parameters.get_eviction_parameter_manager
   parameters_limit: ${state.parameters_limit}
   eviction_proportion: ${state.parameters_eviction_proportion}
 
+get_load_state_file:
+  _target_: utils.utils.load_generic_state_file
+
+get_save_state_to_file:
+  _target_: utils.utils.save_generic_state_to_file
+
+get_state_manager:
+  _target_: state_management.node_state.get_eviction_state_manager
+  parameters_limit: ${state.node_state_limit}
+  eviction_proportion: ${state.node_state_eviction_proportion}

@@ -1,10 +1,11 @@
-alpha: 0.5
-
+---
+anc_alpha: 0.5
+desc_alpha: 0.5
 
 get_anc_node_opt:
-  _target_: "node_optimizers.get_fedavg_weighted_node_opt"
-  alpha: ${client.alpha}
+  _target_: node_optimizer.weighted_fed_avg.get_fedavg_weighted_node_opt
+  alpha: ${client.anc_alpha}
 
 get_desc_node_opt:
-_target_: "node_optimizers.get_fedavg_weighted_node_opt"
-alpha: ${client.alpha}
+  _target_: node_optimizer.weighted_fed_avg.get_fedavg_weighted_node_opt
+  alpha: ${client.desc_alpha}

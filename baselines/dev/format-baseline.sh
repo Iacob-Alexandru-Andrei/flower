@@ -12,8 +12,12 @@ echo "Run isort"
 poetry run python -m isort .
 echo "Run black"
 poetry run python -m black -q .
+echo "Run yamlfix"
+poetry run yamlfix ./$1/
 echo "Run docformatter"
 poetry run python -m docformatter -i -r .
 echo "Run ruff"
 poetry run python -m ruff check --fix .
 echo "Formatting done"
+
+

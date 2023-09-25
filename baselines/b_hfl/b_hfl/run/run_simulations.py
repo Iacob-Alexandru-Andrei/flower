@@ -19,9 +19,9 @@ from b_hfl.client.recursive_builder import (
 from b_hfl.modified_flower.app import start_simulation
 from b_hfl.modified_flower.client_manager import DeterministicClientManager
 from b_hfl.modified_flower.server import History, Server
-from b_hfl.schemas.client_schema import ConfigurableRecClient
-from b_hfl.schemas.file_system_schema import FolderHierarchy
-from b_hfl.strategies.logging_fed_avg import LoggingFedAvg
+from b_hfl.schema.client_schema import ConfigurableRecClient
+from b_hfl.schema.file_system_schema import FolderHierarchy
+from b_hfl.strategy.logging_fed_avg import LoggingFedAvg
 from b_hfl.typing.common_types import (
     ClientFN,
     ConfigSchemaGenerator,
@@ -34,6 +34,7 @@ from b_hfl.typing.common_types import (
     NodeOpt,
     ParametersLoader,
     RecursiveBuilder,
+    StateLoader,
     TestFunc,
     TrainFunc,
     TransformType,
@@ -43,6 +44,7 @@ from b_hfl.utils.task_utils import optimizer_generator_decorator
 from b_hfl.utils.utils import (
     decorate_client_fn_with_recursive_builder,
     decorate_dataset_with_transforms,
+    get_metrics_agg_fn,
     get_save_files_every_round,
     seed_everything,
 )
@@ -161,8 +163,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
         train=train,
         test=test,
         create_dataloader=create_dataloader,
-        fit_metrics_aggregation_fn=call(cfg.fed.get_on_fit_metrics_agg_fn),
-        evaluate_metrics_aggregation_fn=call(cfg.fed.get_on_evaluate_metrics_agg_fn),
+        fit_metrics_aggregation_fn=get_metrics_agg_fn(),
+        evaluate_metrics_aggregation_fn=get_metrics_agg_fn(),
         resources=client_resources,
         timeout=cfg.fed.timeout,
     )
@@ -178,6 +180,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     )(load_dataset_file_no_transforms)
 
     load_parameters_file: ParametersLoader = call(cfg.state.get_load_parameters_file)
+
+    load_state_file: StateLoader = call(cfg.state.get_load_state_file)
 
     on_fit_config_function: LoadConfig = call(cfg.fed.get_on_fit_config_fn)
 
@@ -200,8 +204,11 @@ def build_hydra_client_fn_and_recursive_builder_generator(
                     save_parameters_to_file=call(cfg.state.get_save_parameters_to_file),
                 ),
                 load_state_file=load_state_file,
-                state_manager=state_manager,
-                residuals_manager=residuals_manager,
+                state_manager=call(
+                    cfg.state.get_state_manager,
+                    save_state_to_file=call(cfg.state.get_save_state_to_file),
+                ),
+                residuals_manager={},
                 on_fit_config_fn=on_fit_config_function,
                 on_evaluate_config_fn=on_evaluate_config_function,
                 parameters_file_name=parameters_file_name,
@@ -258,12 +265,13 @@ def get_run_fed_simulation(
             client_fn
         )
 
-        evaluate_fn: EvaluateFunc = call(
-            cfg.fed.get_fed_eval_fn,
+        evaluate_fn: EvaluateFunc = get_fed_eval_fn(
             root_path=path_dict.path,
             client_fn=client_fn,
             recursive_builder=root_recursive_builder,
             on_evaluate_config_function=on_evaluate_config_function,
+            train_config_schema=train_config_schema,
+            test_config_schema=test_config_schema,
         )
 
         parameters_path: Path = path_dict.path / f"parameters{cfg.fed_type}.npz"

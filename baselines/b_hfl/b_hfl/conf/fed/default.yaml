@@ -1,36 +1,29 @@
+---
 num_rounds: 10
-
 num_clients_per_round: 1
 num_total_clients: 1
 num_evaluate_clients_per_round: 0
 seed: 42
-
 max_workers: null
 gpus_per_client: 0
 cpus_per_client: 1
 timeout: null
 
 get_on_fit_config_fn:
-  _target_: "utils.get_config"
-  config_name: "on_fit"
+  _target_: utils.utils.get_config
+  config_name: on_fit
   seed: ${fed.seed}
 
 get_on_evaluate_config_fn:
-  _target_: "utils.get_config"
-  config_name: "on_evaluate"
+  _target_: utils.utils.get_config
+  config_name: on_evaluate
   seed: ${fed.seed}
 
 get_initial_parameters:
-  _target_: "utils.get_initial_parameters"
+  _target_: utils.utils.get_initial_parameters
 
 get_fed_eval_fn:
-  _target_: "run_simulations.get_fed_eval_fn"
-
-get_on_fit_metrics_agg_fn:
-  _target_: "utils.get_metrics_agg_fn"
-
-get_on_evaluate_metrics_agg_fn:
-  _target_: "utils.get_metrics_agg_fn"
+  _target_: run.run_simulations.get_fed_eval_fn
 
 plot_results:
-  _target_: "utils.plot_metric_from_history"
+  _target_: utils.utils.plot_metric_from_history

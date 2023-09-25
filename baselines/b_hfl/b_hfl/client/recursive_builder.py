@@ -7,12 +7,12 @@ from typing import Any, Callable, Dict, Generator, Iterable, Optional, Tuple, ca
 
 from flwr.common import NDArrays
 
-from b_hfl.schemas.client_schema import (
+from b_hfl.schema.client_schema import (
     ConfigurableRecClient,
     RecClientRuntimeTestConf,
     RecClientRuntimeTrainConf,
 )
-from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.state_management.dataset import DatasetManager, get_dataset_generator
 from b_hfl.state_management.node_state import StateManager, get_state_loader
 from b_hfl.state_management.parameters import ParameterManager, get_parameter_generator
@@ -265,6 +265,12 @@ def get_recursive_builder(
             config = RecClientRuntimeTrainConf(**in_conf)
             # Syncrhonise client
             config.client_config.parent_round = parent_conf.client_config.parent_round
+            config.client_config.parent_num_examples = (
+                parent_conf.client_config.parent_num_examples
+            )
+            config.client_config.parent_metrics = (
+                parent_conf.client_config.parent_metrics
+            )
 
             return client_fn(
                 cid,

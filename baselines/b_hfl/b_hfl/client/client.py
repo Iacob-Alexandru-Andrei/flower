@@ -24,7 +24,7 @@ from b_hfl.client.async_collect import (
     process_evaluate_results,
     process_fit_results_and_accumulate_metrics,
 )
-from b_hfl.schemas.client_schema import (
+from b_hfl.schema.client_schema import (
     ConfigurableRecClient,
     RecClientRuntimeTestConf,
     RecClientRuntimeTrainConf,
@@ -137,10 +137,10 @@ class RecursiveClient(ConfigurableRecClient):
             config = in_config
 
         rng = get_seeded_rng(
-            config.global_seed,
-            config.client_seed,
-            config.server_round,
-            config.client_config.parent_round,
+            global_seed=config.global_seed,
+            client_seed=config.client_seed,
+            server_round=config.server_round,
+            parent_round=config.client_config.parent_round,
         )
 
         recursive_structure: RecursiveStructure = self.recursive_builder(
@@ -183,7 +183,21 @@ class RecursiveClient(ConfigurableRecClient):
         self.client_parameters, anc_state = self.anc_node_opt(
             anc_state,
             self.client_parameters,
-            [(parameters, config.parent_num_examples, config.parent_metrics)],
+            [
+                (
+                    parameters,
+                    (
+                        n
+                        if (n := config.client_config.parent_num_examples) is not None
+                        else 0
+                    ),
+                    (
+                        m
+                        if (m := config.client_config.parent_metrics) is not None
+                        else {}
+                    ),
+                )
+            ],
             get_residuals(False),
             config.node_optimizer_config,
         )
@@ -216,8 +230,8 @@ class RecursiveClient(ConfigurableRecClient):
             desc_state = (prev_round_examples, merged_prev_metrics, desc_state[-1])
 
             config.client_config.parent_round = i
-            config.parent_num_examples = prev_round_examples
-            config.parent_metrics = merged_prev_metrics
+            config.client_config.parent_num_examples = prev_round_examples
+            config.client_config.parent_metrics = merged_prev_metrics
 
             round_examples: int = 0
 

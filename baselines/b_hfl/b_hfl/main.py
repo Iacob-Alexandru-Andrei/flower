@@ -24,7 +24,7 @@ from b_hfl.run.run_simulations import (
     run_fed_simulations_recursive,
     train_and_evaluate_optimal_models_from_hierarchy,
 )
-from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.typing.common_types import RecursiveBuilder
 from b_hfl.utils.utils import FileSystemManager, process_histories, wandb_init
 

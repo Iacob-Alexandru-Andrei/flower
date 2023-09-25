@@ -9,61 +9,22 @@ block) that this file should be executed first.
 import csv
 import json
 import os
-import tarfile
 from collections import defaultdict
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-import gdown
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
 
-from b_hfl.schemas.client_schema import RecClientTrainConf
-from b_hfl.schemas.file_system_schema import (
+from b_hfl.schema.client_schema import RecClientTrainConf
+from b_hfl.schema.file_system_schema import (
     ClientFolderHierarchy,
     ConfigFolderHierarchy,
     FolderHierarchy,
 )
 from b_hfl.typing.common_types import ConfigSchemaGenerator
-
-# @hydra.main(config_path="conf", config_name="base", version_base=None)
-# def download_and_preprocess(cfg: DictConfig) -> None:
-#     """Does everything needed to get the dataset.
-
-#     Parameters
-#     ----------
-#     cfg : DictConfig
-#         An omegaconf object that stores the hydra config.
-#     """
-
-#     ## 1. print parsed config
-#     print(OmegaConf.to_yaml(cfg))
-
-#     # Please include here all the logic
-#     # Please use the Hydra config style as much as possible specially
-#     # for parts that can be customised (e.g. how data is partitioned)
-
-
-def download_femnist(dataset_dir: Path = Path("data/femnist")) -> None:
-    """Download and extract the femnist dataset."""
-    #  Download compressed dataset
-    data_file = dataset_dir / "femnist.tar.gz"
-    if not data_file.exists():
-        identifier = "1-CI6-QoEmGiInV23-n_l6Yd8QGWerw8-"
-        gdown.download(
-            f"https://drive.google.com/uc?export=download&confirm=pbef&id={identifier}",
-            str(dataset_dir / "femnist.tar.gz"),
-        )
-
-    decompressed_dataset_dir = dataset_dir / "femnist"
-    # Decompress dataset
-    if not decompressed_dataset_dir.exists():
-        with tarfile.open(data_file, "r:gz") as tar:
-            tar.extractall(decompressed_dataset_dir)
-
-    print(f"Dataset extracted in {dataset_dir}")
 
 
 def get_parameter_convertor(
@@ -257,61 +218,11 @@ def config_map_to_file_hierarchy(
     os.sync()
 
 
-default_femnist_recursive_fit_config = [
-    {
-        "client_config": {
-            "num_rounds": 1,
-            "fit_fraction": 1.0,
-            "train_children": True,
-            "train_chain": False,
-            "train_proxy": False,
-        },
-        "dataloader_config": {
-            "batch_size": 8,
-            "num_workers": 2,
-            "shuffle": False,
-            "test": False,
-        },
-        "parameter_config": {},
-        "net_config": {},
-        "run_config": {
-            "epochs": 1,
-            "client_learning_rate": 0.01,
-            "weight_decay": 0.001,
-        },
-    }
-]
-
-default_femnist_recursive_evaluate_config = [
-    {
-        "client_config": {
-            "eval_fraction": 1.0,
-            "test_children": True,
-            "test_chain": True,
-            "test_proxy": False,
-        },
-        "dataloader_config": {
-            "batch_size": 8,
-            "num_workers": 2,
-            "shuffle": False,
-            "test": False,
-        },
-        "parameter_config": {},
-        "net_config": {},
-        "run_config": {
-            "epochs": 1,
-            "client_learning_rate": 0.01,
-            "weight_decay": 0.001,
-        },
-    }
-]
-
-
 def get_uniform_configs_wrapped(
     train_config_schema: ConfigSchemaGenerator,
     test_config_schema: ConfigSchemaGenerator,
-    on_fit_configs: List[Dict] = default_femnist_recursive_fit_config,
-    on_evaluate_configs: List[Dict] = default_femnist_recursive_evaluate_config,
+    on_fit_configs: List[Dict],
+    on_evaluate_configs: List[Dict],
 ) -> Callable[[FolderHierarchy], ConfigFolderHierarchy]:
     """Get a uniform config hierarchy."""
     train_schema = train_config_schema()
@@ -360,63 +271,8 @@ def get_uniform_configs(
     )
 
 
-if __name__ == "__main__":
-    src_folder = Path(
-        "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/fed_natural"
-    )
-    # pylint: disable=line-too-long
-    out_folder = Path(
-        "/home/aai30/nfs-share/b_hfl/femnist_local/femnist/femnist/client_data_mappings/hierarchical_test"
-    )
-
-    child_map_to_file_hierarchy(
-        ClientFolderHierarchy(
-            **{
-                "name": "0",
-                "children": [
-                    {
-                        "name": "1",
-                        "children": [
-                            {
-                                "name": "3",
-                                "children": [
-                                    {"name": "r_0", "children": []},
-                                    {"name": "r_1", "children": []},
-                                ],
-                            },
-                            {
-                                "name": "4",
-                                "children": [
-                                    {"name": "r_0", "children": []},
-                                    {"name": "r_0", "children": []},
-                                ],
-                            },
-                        ],
-                    },
-                    {
-                        "name": "2",
-                        "children": [
-                            {
-                                "name": "5",
-                                "children": [
-                                    {"name": "r_0", "children": []},
-                                    {"name": "r_1", "children": []},
-                                ],
-                            },
-                            {
-                                "name": "6",
-                                "children": [
-                                    {"name": "r_2", "children": []},
-                                    {"name": "r_0", "children": []},
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            }
-        ),
-        src_folder,
-        out_folder,
-    )
-
-    # download_and_preprocess()
+# def flat_hierarchy_to_edge_assingment(src_folder: Path, assign: Callable[[str, Path], int]) -> ClientFolderHierarchy:
+#     """ Assign leaf clients based on a predicate."""
+#     edge_servers:
+#     child_mapping = extract_child_mapping(src_folder)
+#     for child, path in child_mapping.items():

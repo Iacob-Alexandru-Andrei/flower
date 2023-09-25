@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
-from b_hfl.schemas.file_system_schema import FolderHierarchy
+from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.typing.common_types import FitRes
 
 
