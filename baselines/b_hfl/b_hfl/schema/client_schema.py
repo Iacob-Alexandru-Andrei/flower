@@ -7,17 +7,9 @@ from flwr.common import NDArrays
 from pydantic import BaseModel
 
 
-class ClientConfig(BaseModel):
-    """Pydantic schema for client configuration."""
-
-    parent_round: Optional[int]
-
-
-class ClientTrainConfig(ClientConfig):
+class ClientTrainConfig(BaseModel):
     """Pydantic schema for client training configuration."""
 
-    parent_num_examples: Optional[int]
-    parent_metrics: Optional[Dict]
     num_rounds: int
     fit_fraction: float
     train_children: bool
@@ -27,7 +19,15 @@ class ClientTrainConfig(ClientConfig):
     leaf_to_root_residuals: List[Any]
 
 
-class ClientTestConfig(ClientConfig):
+class ClientTrainRuntimeConfig(ClientTrainConfig):
+    """Pydantic schema for client runtime training configuration."""
+
+    parent_round: Optional[int]
+    parent_num_examples: Optional[int]
+    parent_metrics: Optional[Dict]
+
+
+class ClientTestConfig(BaseModel):
     """Pydantic schema for client testing configuration."""
 
     eval_fraction: float
@@ -36,97 +36,25 @@ class ClientTestConfig(ClientConfig):
     test_proxy: bool
 
 
-class DataloaderConfig(BaseModel):
-    """Pydantic schema for dataloader configuration."""
+class ClientTestRuntimeConfig(ClientTestConfig):
+    """Pydantic schema for client runtime testing configuration."""
 
-    batch_size: int
-    num_workers: int
-    shuffle: bool
-    test: bool
-
-
-class NetConfig(BaseModel):
-    """Pydantic schema for neural network configuration."""
-
-
-class ParameterConfig(BaseModel):
-    """Pydantic schema for parameter configuration."""
-
-
-class NodeOptConfig(BaseModel):
-    """Pydantic schema for parameter configuration."""
-
-
-class StateGeneratorConfig(BaseModel):
-    """Pydantic schema for state generator config."""
-
-
-class StateLoaderConfig(BaseModel):
-    """Pydantic schema for state loader config."""
-
-
-class GetParametersConfig(BaseModel):
-    """Pydantic schema for requiesting parameters."""
-
-
-class DatasetGeneratorConfig(BaseModel):
-    """Pydantic schema for dataset generator configuration."""
-
-
-class RunConfig(BaseModel):
-    """Pydantic schema for run configuration."""
-
-    epochs: int
-    client_learning_rate: float
-    weight_decay: float
-
-
-class RecClientRuntimeConf(BaseModel):
-    """Pydantic schema for recursive client runtime configuration."""
-
-    client_config: Union[ClientTrainConfig, ClientTestConfig]
-    server_round: int
-    global_seed: int
-    client_seed: int
-    dataloader_config: Dict
-    parameter_config: Dict
-    net_config: Dict
-    run_config: Dict
-    state_loader_config: Dict
-    state_generator_config: Dict
-    node_optimizer_config: Dict
-    get_parameters_config: Dict
-    dataset_generator_config: Dict
-
-
-class RecClientRuntimeTrainConf(RecClientRuntimeConf):
-    """Pydantic schema for recursive client train configuration."""
-
-    client_config: ClientTrainConfig
-
-
-class RecClientRuntimeTestConf(RecClientRuntimeConf):
-    """Pydantic schema for recursive client test configuration."""
-
-    client_config: ClientTestConfig
+    parent_round: Optional[int]
 
 
 class RecClientConf(BaseModel):
     """Pydantic schema for recursive client configuration."""
 
-    client_config: Union[ClientTrainConfig, ClientTestConfig]
-    dataloader_config: DataloaderConfig
-    run_config: RunConfig
-    server_round: Optional[int]
-    global_seed: Optional[int]
-    client_seed: Optional[int]
-    parameter_config: Optional[ParameterConfig]
-    net_config: Optional[NetConfig]
-    state_loader_config: Optional[StateLoaderConfig]
-    state_generator_config: Optional[StateGeneratorConfig]
-    node_optimizer_config: Optional[NodeOptConfig]
-    get_parameters_config: Optional[GetParametersConfig]
-    dataset_generator_config: Optional[DatasetGeneratorConfig]
+    dataloader_config: Dict
+    run_config: Dict
+    parameter_config: Dict
+    net_config: Dict
+    state_loader_config: Dict
+    state_generator_config: Dict
+    anc_node_optimizer_config: Dict
+    desc_node_optimizer_config: Dict
+    get_parameters_config: Dict
+    dataset_generator_config: Dict
 
 
 class RecClientTrainConf(RecClientConf):
@@ -141,20 +69,24 @@ class RecClientTestConf(RecClientConf):
     client_config: ClientTestConfig
 
 
-def get_recursive_client_train_configs() -> Callable:
-    """Return a callable that returns a recursive client train config.
+class RecClientRuntimeConf(RecClientConf):
+    """Pydantic schema for recursive client runtime configuration."""
 
-    For both validation and instantiation.
-    """
-    return lambda: RecClientTrainConf
+    server_round: int
+    global_seed: int
+    client_seed: int
 
 
-def get_recursive_client_test_configs() -> Callable:
-    """Return a callable that returns a recursive client test config.
+class RecClientRuntimeTrainConf(RecClientRuntimeConf):
+    """Pydantic schema for recursive client train configuration."""
 
-    For both validation and instantiation.
-    """
-    return lambda: RecClientTestConf
+    client_config: ClientTrainRuntimeConfig
+
+
+class RecClientRuntimeTestConf(RecClientRuntimeConf):
+    """Pydantic schema for recursive client test configuration."""
+
+    client_config: ClientTestRuntimeConfig
 
 
 class ConfigurableRecClient(fl.client.NumPyClient, abc.ABC):

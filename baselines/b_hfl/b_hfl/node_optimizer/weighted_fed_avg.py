@@ -1,14 +1,20 @@
 """Optimize node parameters for hierarchical clients."""
-from typing import Callable, Dict, Iterable, List, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple, Union
 
 from flwr.common import NDArrays
 from flwr.server.strategy.aggregate import aggregate
+from pydantic import BaseModel
 
 from b_hfl.typing.common_types import FitRes, NodeOpt, State
 
 
+class WeightedAvgConfig(BaseModel):
+    """Pydantic schema for weighted average configuration."""
+
+    alpha: float
+
+
 def get_fedavg_weighted_node_opt(
-    alpha: float,
     node_aggregate: Callable[[List[Tuple[NDArrays, int]]], NDArrays] = aggregate,
 ) -> NodeOpt:
     """Get the federated averaging strategy for node optimizer."""
@@ -18,7 +24,7 @@ def get_fedavg_weighted_node_opt(
         parameters: NDArrays,
         child_parameters: Iterable[FitRes],
         residuals: Iterable[FitRes],
-        _config: Dict,
+        config: Union[Dict, WeightedAvgConfig],
     ) -> Tuple[NDArrays, State]:
         """Federated averaging strategy for node optimizer.
 
@@ -34,6 +40,9 @@ def get_fedavg_weighted_node_opt(
         parameters : NDArrays
             The updated (global) model parameters.
         """
+        if isinstance(config, Dict):
+            config = WeightedAvgConfig(**config)
+
         child_results = [
             (params, num_examples)
             for (params, num_examples, _) in child_parameters
@@ -44,7 +53,7 @@ def get_fedavg_weighted_node_opt(
         )
         return (
             [
-                parent_layer * alpha + child_layer * (1 - alpha)
+                parent_layer * config.alpha + child_layer * (1 - config.alpha)
                 for parent_layer, child_layer in zip(parameters, children_parameters)
             ],
             state,

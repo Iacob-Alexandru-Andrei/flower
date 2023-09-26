@@ -199,7 +199,7 @@ class RecursiveClient(ConfigurableRecClient):
                 )
             ],
             get_residuals(False),
-            config.node_optimizer_config,
+            config.anc_node_optimizer_config,
         )
 
         total_examples: Union[float, int] = 0
@@ -266,7 +266,7 @@ class RecursiveClient(ConfigurableRecClient):
                         selected_children,
                     ),
                     get_residuals(True),
-                    config.node_optimizer_config,
+                    config.desc_node_optimizer_config,
                 )
                 round_examples += int(
                     sum((num_examples for num_examples, _ in children_results))

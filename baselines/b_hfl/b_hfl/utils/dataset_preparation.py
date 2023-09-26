@@ -13,7 +13,7 @@ from collections import defaultdict
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, cast
 
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel
@@ -65,37 +65,50 @@ def get_folder_hierarchy(
 ) -> FolderHierarchy:
     """Build a dictionary representation of the file system."""
     # Schema of the path_dict
+    levels_to_folder: List[List[FolderHierarchy]] = []
 
     def rec_get_folder_hierarchy(
         root: Path,
         path: Path,
+        level: int,
         parent_path: Optional[Path] = None,
         parent: Optional[FolderHierarchy] = None,
     ) -> FolderHierarchy:
+        nonlocal levels_to_folder
+
         path_dict: FolderHierarchy = FolderHierarchy(
-            **{
-                "root": root,
-                "parent": parent,
-                "parent_path": parent_path,
-                "path": path,
-                "children": [],
-            }
+            root=root,
+            parent=parent,
+            parent_path=parent_path,
+            path=path,
+            children=[],
+            levels_to_folder=levels_to_folder,
         )
+
+        while len(levels_to_folder) < level:
+            levels_to_folder.append([])
+
+        levels_to_folder[level].append(path_dict)
+
         # Build the tree
 
         for _, child_path in enumerate(path.iterdir()):
             if child_path.is_dir():
                 path_dict.children.append(
                     rec_get_folder_hierarchy(
-                        root,
-                        child_path,
-                        parent_path,
-                        path_dict,
+                        root=root,
+                        path=child_path,
+                        level=level + 1,
+                        parent_path=parent_path,
+                        parent=path_dict,
                     )
                 )
+
         return path_dict
 
-    return rec_get_folder_hierarchy(path, path, parent_path, parent)
+    return rec_get_folder_hierarchy(
+        root=path, path=path, level=0, parent_path=parent_path, parent=parent
+    )
 
 
 def extract_child_mapping(root: Path) -> Dict[str, Path]:
@@ -271,8 +284,112 @@ def get_uniform_configs(
     )
 
 
-# def flat_hierarchy_to_edge_assingment(src_folder: Path, assign: Callable[[str, Path], int]) -> ClientFolderHierarchy:
-#     """ Assign leaf clients based on a predicate."""
-#     edge_servers:
-#     child_mapping = extract_child_mapping(src_folder)
-#     for child, path in child_mapping.items():
+def hierarchy_to_edge_assingment(
+    src_folder: Path,
+    assign_flat: Callable[[str, Path], str],
+    assign_rec: List[Callable[[ClientFolderHierarchy], str]],
+) -> ClientFolderHierarchy:
+    """Assign leaf clients based on a predicate."""
+    hierarchy_dict: Dict[str, ClientFolderHierarchy] = {}
+    child_mapping = extract_child_mapping(src_folder)
+    for child, path in child_mapping.items():
+        edge_server_index = assign_flat(child, path)
+        if edge_server_index not in hierarchy_dict:
+            hierarchy_dict[edge_server_index] = ClientFolderHierarchy(
+                **{"name": edge_server_index, "children": []}
+            )
+
+        hierarchy_dict[edge_server_index].children.append(
+            ClientFolderHierarchy(**{"name": child, "children": []})
+        )
+    full_hierarchy = hierarchy_to_edge_assingment_rec(hierarchy_dict, assign_rec)
+    if len(full_hierarchy) != 1:
+        raise ValueError("The hierarchy should have only one root")
+    return next(iter(full_hierarchy.values()))
+
+
+def hierarchy_to_edge_assingment_rec(
+    hierarchy_dict: Dict[str, ClientFolderHierarchy],
+    assign_rec: List[Callable[[ClientFolderHierarchy], str]],
+) -> Dict[str, ClientFolderHierarchy]:
+    """Assign internal nodes based on a predicate."""
+    if len(assign_rec) == 0:
+        return hierarchy_dict
+
+    level_assign = assign_rec.pop(0)
+    level_hierarchy_dict: Dict[str, ClientFolderHierarchy] = {}
+    for name, hierarchy in hierarchy_dict.items():
+        server_index = level_assign(hierarchy)
+        if server_index not in level_hierarchy_dict:
+            level_hierarchy_dict[server_index] = ClientFolderHierarchy(
+                **{"name": server_index, "children": []}
+            )
+        level_hierarchy_dict[server_index].children.append(hierarchy)
+    return hierarchy_to_edge_assingment_rec(level_hierarchy_dict, assign_rec)
+
+
+def get_modulo_assign_flat(
+    num_edge_servers: int,
+) -> Callable[[str, Path], str]:
+    """Get a modulo assignment function."""
+
+    client_cnt = 0
+
+    def assign_flat(
+        child: str,
+        path: Path,
+    ) -> str:
+        nonlocal client_cnt
+
+        to_ret = f"{client_cnt % num_edge_servers}"
+        client_cnt += 1
+        return to_ret
+
+    return assign_flat
+
+
+def get_modulo_assign_rec(
+    num_servers_per_level: List[int],
+) -> List[Callable[[ClientFolderHierarchy], str]]:
+    """Get a modulo assignment function per-level."""
+
+    def get_assign_modulo(
+        num_servers: int,
+    ) -> Callable[[ClientFolderHierarchy], str]:
+        client_cnt = 0
+
+        def assign_modulo(folder_hierarchy: ClientFolderHierarchy) -> str:
+            nonlocal client_cnt
+            to_ret = f"{client_cnt % num_servers}"
+            client_cnt += 1
+            return to_ret
+
+        return assign_modulo
+
+    return [
+        get_assign_modulo(num_edge_servers)
+        for num_edge_servers in num_servers_per_level
+    ]
+
+
+def get_configs_per_level(
+    path_dict: FolderHierarchy,
+    level_config_generator: Callable[
+        [FolderHierarchy], Tuple[List[BaseModel], List[BaseModel]]
+    ],
+) -> ConfigFolderHierarchy:
+    on_fit_configs, on_fit_configs = level_config_generator(path_dict)
+
+    children = [
+        get_configs_per_level(child, level_config_generator)
+        for child in path_dict.children
+    ]
+
+    return ConfigFolderHierarchy(
+        **{
+            "path": path_dict.path,
+            "on_fit_configs": on_fit_configs,
+            "on_evaluate_configs": on_fit_configs,
+            "children": children,
+        }
+    )

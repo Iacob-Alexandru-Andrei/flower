@@ -39,7 +39,10 @@ from b_hfl.typing.common_types import (
     TrainFunc,
     TransformType,
 )
-from b_hfl.utils.dataset_preparation import ConfigFolderHierarchy
+from b_hfl.utils.dataset_preparation import (
+    ConfigFolderHierarchy,
+    config_map_to_file_hierarchy,
+)
 from b_hfl.utils.task_utils import optimizer_generator_decorator
 from b_hfl.utils.utils import (
     decorate_client_fn_with_recursive_builder,
@@ -134,8 +137,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
 
     config_mapping: ConfigFolderHierarchy = get_config_mapping(path_dict)
 
-    call(
-        config=cfg.data.create_configs,
+    # Turn the logical mapping into a file system mapping
+    config_map_to_file_hierarchy(
         logical_mapping=config_mapping,
     )
 

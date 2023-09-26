@@ -24,6 +24,7 @@ from b_hfl.run.run_simulations import (
     run_fed_simulations_recursive,
     train_and_evaluate_optimal_models_from_hierarchy,
 )
+from b_hfl.run.preparation import partition
 from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.typing.common_types import RecursiveBuilder
 from b_hfl.utils.utils import FileSystemManager, process_histories, wandb_init
@@ -45,6 +46,12 @@ def main(cfg: DictConfig) -> None:
 
     os.environ["HYDRA_FULL_ERROR"] = "1"
     os.environ["OC_CAUSE"] = "1"
+
+    # 2. Download the dataset
+    call(cfg.task.data.get_download_and_preprocess)(cfg)
+
+    # 3. Partition the dataset
+    partition(cfg)
 
     wandb_config = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
 
