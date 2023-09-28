@@ -99,7 +99,6 @@ class EvictionStateManager(StateManager):
         """Cleanup the parameter manager."""
         for path in self.state_dict:
             self.save_state(path, None)
-        os.sync()
         self.state_dict = {}
 
     def _evict(self) -> None:

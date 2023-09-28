@@ -13,18 +13,16 @@ from collections import defaultdict
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from omegaconf import DictConfig, OmegaConf
-from pydantic import BaseModel
 
-from b_hfl.schema.client_schema import RecClientTrainConf
+from b_hfl.schema.client_schema import RecClientTestConf, RecClientTrainConf
 from b_hfl.schema.file_system_schema import (
     ClientFolderHierarchy,
     ConfigFolderHierarchy,
     FolderHierarchy,
 )
-from b_hfl.typing.common_types import ConfigSchemaGenerator
 
 
 def get_parameter_convertor(
@@ -65,7 +63,6 @@ def get_folder_hierarchy(
 ) -> FolderHierarchy:
     """Build a dictionary representation of the file system."""
     # Schema of the path_dict
-    levels_to_folder: List[List[FolderHierarchy]] = []
 
     def rec_get_folder_hierarchy(
         root: Path,
@@ -74,35 +71,31 @@ def get_folder_hierarchy(
         parent_path: Optional[Path] = None,
         parent: Optional[FolderHierarchy] = None,
     ) -> FolderHierarchy:
-        nonlocal levels_to_folder
-
         path_dict: FolderHierarchy = FolderHierarchy(
             root=root,
             parent=parent,
             parent_path=parent_path,
+            level=level,
+            max_level=level,
             path=path,
             children=[],
-            levels_to_folder=levels_to_folder,
         )
 
-        while len(levels_to_folder) < level:
-            levels_to_folder.append([])
-
-        levels_to_folder[level].append(path_dict)
-
         # Build the tree
-
+        true_max_level = level
         for _, child_path in enumerate(path.iterdir()):
             if child_path.is_dir():
-                path_dict.children.append(
-                    rec_get_folder_hierarchy(
-                        root=root,
-                        path=child_path,
-                        level=level + 1,
-                        parent_path=parent_path,
-                        parent=path_dict,
-                    )
+                child_path_dict = rec_get_folder_hierarchy(
+                    root=root,
+                    path=child_path,
+                    level=level + 1,
+                    parent_path=parent_path,
+                    parent=path_dict,
                 )
+                path_dict.children.append(child_path_dict)
+                true_max_level = max(true_max_level, child_path_dict.max_level)
+
+        path_dict.max_level = true_max_level
 
         return path_dict
 
@@ -127,7 +120,7 @@ def extract_child_mapping(root: Path) -> Dict[str, Path]:
     path_dict = get_folder_hierarchy(root)
     mapping: Dict[str, Path] = {}
     for child in path_dict.children:
-        mapping[f"r_{child['path'].name}"] = child.path
+        mapping[f"r_{child.path.name}"] = child.path
     return mapping
 
 
@@ -210,12 +203,12 @@ def config_map_to_file_hierarchy(
         config_folder_hierarchy: ConfigFolderHierarchy,
     ) -> None:
         on_fit_configs = [
-            on_fit_config.dict()
+            json.loads(on_fit_config.json())
             for on_fit_config in config_folder_hierarchy.on_fit_configs
         ]
 
         on_evaluate_configs = [
-            on_evaluate_config.dict()
+            json.loads(on_evaluate_config.json())
             for on_evaluate_config in config_folder_hierarchy.on_evaluate_configs
         ]
         with open(config_folder_hierarchy.path / "on_fit_config.json", "w") as f:
@@ -228,23 +221,19 @@ def config_map_to_file_hierarchy(
             rec_config_map_to_file_hierarchy(child_config)
 
     rec_config_map_to_file_hierarchy(logical_mapping)
-    os.sync()
 
 
 def get_uniform_configs_wrapped(
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
     on_fit_configs: List[Dict],
     on_evaluate_configs: List[Dict],
 ) -> Callable[[FolderHierarchy], ConfigFolderHierarchy]:
     """Get a uniform config hierarchy."""
-    train_schema = train_config_schema()
-    test_schema = test_config_schema()
-    new_on_fit_configs: List[BaseModel] = [
-        train_schema(**on_fit_config) for on_fit_config in on_fit_configs
+    new_on_fit_configs: List[RecClientTrainConf] = [
+        RecClientTrainConf(**on_fit_config) for on_fit_config in on_fit_configs
     ]
-    new_on_evaluate_configs: List[BaseModel] = [
-        test_schema(**on_evaluate_config) for on_evaluate_config in on_evaluate_configs
+    new_on_evaluate_configs: List[RecClientTestConf] = [
+        RecClientTestConf(**on_evaluate_config)
+        for on_evaluate_config in on_evaluate_configs
     ]
 
     def wrapped_get_uniform_config(
@@ -259,8 +248,8 @@ def get_uniform_configs_wrapped(
 
 def get_uniform_configs(
     path_dict: FolderHierarchy,
-    on_fit_configs: List[BaseModel],
-    on_evaluate_configs: List[BaseModel],
+    on_fit_configs: List[RecClientTrainConf],
+    on_evaluate_configs: List[RecClientTestConf],
 ) -> ConfigFolderHierarchy:
     """Get a uniform config hierarchy."""
     new_fit_configs = deepcopy(on_fit_configs)
@@ -286,7 +275,7 @@ def get_uniform_configs(
 
 def hierarchy_to_edge_assingment(
     src_folder: Path,
-    assign_flat: Callable[[str, Path], str],
+    assign_flat: Callable[[str, Path], Optional[str]],
     assign_rec: List[Callable[[ClientFolderHierarchy], str]],
 ) -> ClientFolderHierarchy:
     """Assign leaf clients based on a predicate."""
@@ -294,6 +283,9 @@ def hierarchy_to_edge_assingment(
     child_mapping = extract_child_mapping(src_folder)
     for child, path in child_mapping.items():
         edge_server_index = assign_flat(child, path)
+        if edge_server_index is None:
+            continue
+
         if edge_server_index not in hierarchy_dict:
             hierarchy_dict[edge_server_index] = ClientFolderHierarchy(
                 **{"name": edge_server_index, "children": []}
@@ -318,8 +310,9 @@ def hierarchy_to_edge_assingment_rec(
 
     level_assign = assign_rec.pop(0)
     level_hierarchy_dict: Dict[str, ClientFolderHierarchy] = {}
-    for name, hierarchy in hierarchy_dict.items():
+    for _name, hierarchy in hierarchy_dict.items():
         server_index = level_assign(hierarchy)
+
         if server_index not in level_hierarchy_dict:
             level_hierarchy_dict[server_index] = ClientFolderHierarchy(
                 **{"name": server_index, "children": []}
@@ -330,16 +323,19 @@ def hierarchy_to_edge_assingment_rec(
 
 def get_modulo_assign_flat(
     num_edge_servers: int,
-) -> Callable[[str, Path], str]:
+    max_edge_clients: int,
+) -> Callable[[str, Path], Optional[str]]:
     """Get a modulo assignment function."""
-
     client_cnt = 0
 
     def assign_flat(
         child: str,
         path: Path,
-    ) -> str:
+    ) -> Optional[str]:
         nonlocal client_cnt
+
+        if client_cnt >= max_edge_clients:
+            return None
 
         to_ret = f"{client_cnt % num_edge_servers}"
         client_cnt += 1
@@ -375,21 +371,21 @@ def get_modulo_assign_rec(
 def get_configs_per_level(
     path_dict: FolderHierarchy,
     level_config_generator: Callable[
-        [FolderHierarchy], Tuple[List[BaseModel], List[BaseModel]]
+        [FolderHierarchy], Tuple[List[RecClientTrainConf], List[RecClientTestConf]]
     ],
 ) -> ConfigFolderHierarchy:
-    on_fit_configs, on_fit_configs = level_config_generator(path_dict)
+    """Get a config hierarchy per level."""
+    on_fit_configs, on_evaluate_configs = level_config_generator(path_dict)
 
     children = [
         get_configs_per_level(child, level_config_generator)
         for child in path_dict.children
     ]
-
     return ConfigFolderHierarchy(
         **{
             "path": path_dict.path,
             "on_fit_configs": on_fit_configs,
-            "on_evaluate_configs": on_fit_configs,
+            "on_evaluate_configs": on_evaluate_configs,
             "children": children,
         }
     )

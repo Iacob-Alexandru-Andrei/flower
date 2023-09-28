@@ -1,7 +1,8 @@
 """Training and testing functions for the FEMNIST dataset."""
-from typing import Dict, Iterator, Tuple
+from typing import Dict, Iterator, Tuple, Union, cast
 
 import torch
+from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -9,15 +10,30 @@ from b_hfl.typing.common_types import OptimizerGenerator
 from b_hfl.utils.utils import lazy_wrapper
 
 
+class RunConfig(BaseModel):
+    """Pydantic schema for run configuration."""
+
+    device: Union[str, torch.device]
+    epochs: int
+    client_learning_rate: float
+    weight_decay: float
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 @lazy_wrapper
 def optimizer_generator_femnist(
-    parameters: Iterator[nn.parameter.Parameter], cfg: Dict
+    parameters: Iterator[nn.parameter.Parameter], cfg: Union[Dict, RunConfig]
 ) -> torch.optim.Optimizer:
     """Create an AdamW optimizer for the femnist dataset."""
+    if isinstance(cfg, Dict):
+        cfg = RunConfig(**cfg)
+
     return torch.optim.AdamW(
         parameters,
-        lr=float(cfg["client_learning_rate"]),
-        weight_decay=float(cfg["weight_decay"]),
+        lr=float(cfg.client_learning_rate),
+        weight_decay=float(cfg.weight_decay),
     )
 
 
@@ -25,7 +41,7 @@ def optimizer_generator_femnist(
 def train_femnist(
     net: nn.Module,
     train_loader: DataLoader,
-    cfg: Dict,
+    cfg: Union[Dict, RunConfig],
     optimizer_generator: OptimizerGenerator,
 ) -> Tuple[int, Dict]:
     """Trains the network on the training set.
@@ -42,16 +58,19 @@ def train_femnist(
     -------
         float: the final epoch mean train loss.
     """
+    if isinstance(cfg, Dict):
+        cfg = RunConfig(**cfg)
+
     net.train()
     running_loss, total = 0.0, 0
     criterion = torch.nn.CrossEntropyLoss()
 
-    optimizer = optimizer_generator(net.parameters(), cfg)
-    for _ in range(cfg["epochs"]):
+    optimizer = optimizer_generator(net.parameters(), cast(Dict, cfg))
+    for _ in range(cfg.epochs):
         running_loss = 0.0
         total = 0
         for data, labels in train_loader:
-            data, labels = data.to(cfg["device"]), labels.to(cfg["device"])
+            data, labels = data.to(cfg.device), labels.to(cfg.device)
 
             optimizer.zero_grad()
             loss = criterion(net(data), labels)
@@ -62,11 +81,20 @@ def train_femnist(
     return total, {"avg_loss_train": running_loss / total}
 
 
+class TestConfig(BaseModel):
+    """Pydantic schema for run configuration."""
+
+    device: Union[str, torch.device]
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 @lazy_wrapper
 def test_femnist(
     net: nn.Module,
     test_loader: DataLoader,
-    cfg: Dict,
+    cfg: Union[Dict, TestConfig],
 ) -> Tuple[float, int, Dict]:
     """Validate the network on a test set.
 
@@ -80,13 +108,16 @@ def test_femnist(
     -------
         Tuple[float, float]: average test loss and average accuracy on test set.
     """
+    if isinstance(cfg, Dict):
+        cfg = TestConfig(**cfg)
+
     correct, total, loss = 0, 0, 0.0
     net.eval()
     criterion = torch.nn.CrossEntropyLoss()
     with torch.no_grad():
         # for data, labels in tqdm(test_loader):
         for data, labels in test_loader:
-            data, labels = data.to(cfg["device"]), labels.to(cfg["device"])
+            data, labels = data.to(cfg.device), labels.to(cfg.device)
             outputs = net(data)
 
             loss += criterion(outputs, labels).item()

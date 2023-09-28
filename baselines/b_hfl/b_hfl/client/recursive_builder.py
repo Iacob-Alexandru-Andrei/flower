@@ -20,7 +20,6 @@ from b_hfl.state_management.residuals import get_residuals, send_residuals
 from b_hfl.typing.common_types import (
     ClientFN,
     ClientResGeneratorList,
-    ConfigSchemaGenerator,
     DatasetLoader,
     EvalRes,
     FitRes,
@@ -47,11 +46,10 @@ def get_recursive_builder(
     residuals_manager: Dict[Any, Dict[Any, FitRes]],
     on_fit_config_fn: LoadConfig,
     on_evaluate_config_fn: LoadConfig,
+    experiment_type: str,
     parameters_file_name: str,
     parameters_ext: str,
     executor: concurrent.futures.Executor,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
     anc_state_file_name: str = "_anc_state",
     desc_state_file_name: str = "_desc_state",
 ) -> RecursiveBuilder:
@@ -60,8 +58,9 @@ def get_recursive_builder(
     This is recursively caled within the inner function for each child of a given node.
     """
     cur_round: int = 0
-    anc_state_file_name = f"{parameters_file_name}{anc_state_file_name}"
-    desc_state_file_name = f"{parameters_file_name}{desc_state_file_name}"
+    parameters_file_name = f"{parameters_file_name}{experiment_type}"
+    anc_state_file_name = f"{anc_state_file_name}{experiment_type}"
+    desc_state_file_name = f"{desc_state_file_name}{experiment_type}"
 
     def recursive_builder(
         current_client: ConfigurableRecClient,
@@ -197,7 +196,7 @@ def get_recursive_builder(
                 state_manager=state_manager,
             ),
             get_state_loader(
-                state_file=anc_state_file,
+                state_file=desc_state_file,
                 load_state_file=load_state_file,
                 state_manager=state_manager,
             ),
@@ -261,7 +260,6 @@ def get_recursive_builder(
         def fit_client(
             params: NDArrays, in_conf: Dict, parent_conf: RecClientRuntimeTrainConf
         ) -> FitRes:
-            train_config_schema(**in_conf)
             config = RecClientRuntimeTrainConf(**in_conf)
             # Syncrhonise client
             config.client_config.parent_round = parent_conf.client_config.parent_round
@@ -277,8 +275,6 @@ def get_recursive_builder(
                 child_path_dict.path,
                 root,
                 current_client,
-                train_config_schema,
-                test_config_schema,
                 get_recursive_builder(
                     root=root,
                     path_dict=child_path_dict,
@@ -291,13 +287,12 @@ def get_recursive_builder(
                     residuals_manager=residuals_manager,
                     on_fit_config_fn=on_fit_config_fn,
                     on_evaluate_config_fn=on_evaluate_config_fn,
+                    experiment_type=experiment_type,
                     parameters_file_name=parameters_file_name,
                     parameters_ext=parameters_ext,
                     executor=executor,
-                    train_config_schema=train_config_schema,
-                    test_config_schema=test_config_schema,
                 ),
-            ).fit(parameters=params, config=config)
+            ).fit(params, config)
 
         return lambda params, conf, parent_conf: executor.submit(
             fit_client, params, conf, parent_conf
@@ -315,7 +310,6 @@ def get_recursive_builder(
         def evaluate_client(
             params: NDArrays, in_conf: Dict, parent_conf: RecClientRuntimeTestConf
         ) -> EvalRes:
-            test_config_schema(**in_conf)
             config = RecClientRuntimeTestConf(**in_conf)
             config.client_config.parent_round = parent_conf.client_config.parent_round
 
@@ -324,8 +318,6 @@ def get_recursive_builder(
                 child_path_dict.path,
                 root,
                 current_client,
-                train_config_schema,
-                test_config_schema,
                 get_recursive_builder(
                     root=root,
                     path_dict=child_path_dict,
@@ -339,12 +331,11 @@ def get_recursive_builder(
                     on_fit_config_fn=on_fit_config_fn,
                     on_evaluate_config_fn=on_evaluate_config_fn,
                     parameters_file_name=parameters_file_name,
+                    experiment_type=experiment_type,
                     parameters_ext=parameters_ext,
                     executor=executor,
-                    train_config_schema=train_config_schema,
-                    test_config_schema=test_config_schema,
                 ),
-            ).evaluate(parameters=params, config=config)
+            ).evaluate(params, config)
 
         return lambda params, conf, parent_conf: executor.submit(
             evaluate_client, params, conf, parent_conf

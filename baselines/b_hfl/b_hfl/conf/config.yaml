@@ -1,7 +1,6 @@
 ---
 defaults:
   - _self_
-  - client: default
   - fed: default
   - data: default
   - state: default
@@ -10,8 +9,8 @@ defaults:
   - task: femnist
 
 reuse_output_dir: null
-train_optimal: true
-recursively_train_all_optimal_models: true
+train_optimal: false
+recursively_train_all_optimal_models: false
 optimal_name: _optimal
 optimal_type: ${optimal_name}_root_${task.data.client_folder}
 train_fed: true
@@ -25,7 +24,7 @@ wandb:
   mode: enabled
   setup:
     project: B_HFL_ICLR
-    group: ${task.data.dataset_path}
+    group: ${task.data.preparation.dataset_path}
     tags:
       - strategy_${strategy.name}
       - net_${task.client.network}

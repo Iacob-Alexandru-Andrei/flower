@@ -55,6 +55,9 @@ types-protobuf = "^4.24.0.1"
 pydantic = "<2"
 omegaconf = "2.3.0"
 yamlfix = "^1.14.0"
+types-pyyaml = "^6.0.12.12"
+types-decorator = "^5.1.8.4"
+types-setuptools = "^68.2.0.0"
 
 [tool.poetry.dev-dependencies]
 isort = "==5.11.5"
@@ -89,6 +92,7 @@ testpaths = [
 
 [tool.mypy]
 ignore_missing_imports = true
+show_error_codes = true
 strict = false
 plugins = "numpy.typing.mypy_plugin"
 

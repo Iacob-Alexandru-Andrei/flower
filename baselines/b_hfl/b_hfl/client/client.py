@@ -15,6 +15,7 @@ from flwr.common import (
     Metrics,
     MetricsAggregationFn,
     NDArrays,
+    Properties,
     Status,
 )
 from torch.utils.data import Dataset
@@ -33,7 +34,6 @@ from b_hfl.typing.common_types import (
     ClientEvaluateFutureList,
     ClientFitFutureList,
     ClientFN,
-    ConfigSchemaGenerator,
     DataloaderGenerator,
     EvalRecursiveStructure,
     EvalRes,
@@ -46,7 +46,12 @@ from b_hfl.typing.common_types import (
     TestFunc,
     TrainFunc,
 )
-from b_hfl.utils.utils import get_parameters, get_seeded_rng, set_parameters
+from b_hfl.utils.utils import (
+    get_parameters,
+    get_parameters_norm,
+    get_seeded_rng,
+    set_parameters,
+)
 
 
 class RecursiveClient(ConfigurableRecClient):
@@ -73,8 +78,6 @@ class RecursiveClient(ConfigurableRecClient):
         client_fn: ClientFN,
         fit_metrics_aggregation_fn: MetricsAggregationFn,
         evaluate_metrics_aggregation_fn: MetricsAggregationFn,
-        train_config_schema: ConfigSchemaGenerator,
-        test_config_schema: ConfigSchemaGenerator,
         resources: Dict,
         timeout: Optional[float],
     ) -> None:
@@ -100,24 +103,25 @@ class RecursiveClient(ConfigurableRecClient):
 
         self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
 
-        self.train_schema = train_config_schema()
-        self.test_schema = test_config_schema()
-
         # Handles building the hierarchical structure of the clients
         self.recursive_builder = recursive_builder
         self.client_fn = client_fn
         self.sep = "::"
         self.root = root
+        self.relative_id = self.true_id.relative_to(self.root.parent)
 
         # Ray execution resources
         self.resources = resources
         self.timeout = timeout
 
-    def get_properties(self, config: GetPropertiesIns) -> GetPropertiesRes:
+    # type: ignore[override]
+    def get_properties(
+        self, config: GetPropertiesIns  # type: ignore[override]
+    ) -> GetPropertiesRes:  # type: ignore[override]
         """Return the properties of the client."""
         return GetPropertiesRes(
             Status(Code.OK, ""),
-            {"true_id": self.true_id, "cid": self.cid},  # type: ignore
+            cast(Properties, {"true_id": self.true_id, "cid": self.cid}),
         )
 
     # pylint: disable=too-many-locals,arguments-differ
@@ -131,7 +135,6 @@ class RecursiveClient(ConfigurableRecClient):
         #TODO: Add detailed explanation
         """
         if isinstance(in_config, Dict):
-            self.test_schema(**in_config)
             config = RecClientRuntimeTrainConf(**in_config)
         else:
             config = in_config
@@ -281,7 +284,7 @@ class RecursiveClient(ConfigurableRecClient):
                 train_chain_dataset_generator,
                 self.get_parameters(config.get_parameters_config),
                 config,
-                mode="" if config.client_config.train_chain else None,
+                mode="chain" if config.client_config.train_chain else None,
             )
 
             round_examples += train_chain_examples
@@ -328,18 +331,20 @@ class RecursiveClient(ConfigurableRecClient):
 
         results: Metrics = {}
 
-        children_results_final_round = self.fit_metrics_aggregation_fn(children_results)
-        results.update(children_results_final_round)
+        children_results_final_round = self.fit_metrics_aggregation_fn(
+            children_results,
+            self.relative_id,  # type: ignore[arg-type]
+        )
 
         train_self_metrics_final_round = self.fit_metrics_aggregation_fn(
             [
                 (train_chain_examples, train_chain_metrics),
                 (train_proxy_examples, train_proxy_metrics),
             ],
+            self.relative_id,  # type: ignore[arg-type]
         )
+        results.update(children_results_final_round)
         results.update(train_self_metrics_final_round)
-        results.update(train_chain_metrics)
-        results.update(train_proxy_metrics)
 
         recursive_step((self.client_parameters, anc_state, desc_state), True)
         return (
@@ -357,7 +362,6 @@ class RecursiveClient(ConfigurableRecClient):
         #TODO: Add detailed explanation
         """
         if isinstance(in_config, Dict):
-            self.test_schema(**in_config)
             config = RecClientRuntimeTestConf(**in_config)
         else:
             config = in_config
@@ -417,12 +421,14 @@ class RecursiveClient(ConfigurableRecClient):
         )
         results: Metrics = {}
         children_results_metrics = self.evaluate_metrics_aggregation_fn(
-            [(num_examples, metrics) for _, num_examples, metrics in children_results]
+            [(num_examples, metrics) for _, num_examples, metrics in children_results],
+            self.relative_id,  # type: ignore[arg-type]
         )
         results.update(children_results_metrics)
 
         test_self_metrics = self.evaluate_metrics_aggregation_fn(
-            [(num_examples, test_metrics), (proxy_num_examples, proxy_metrics)]
+            [(num_examples, test_metrics), (proxy_num_examples, proxy_metrics)],
+            self.relative_id,  # type: ignore[arg-type]
         )
         results.update(test_self_metrics)
 
@@ -462,8 +468,7 @@ class RecursiveClient(ConfigurableRecClient):
                 parameters,
                 config,
                 mode,
-                self.true_id,
-                self.root,
+                self.relative_id,
                 self.sep,
             )
             return cast(
@@ -491,8 +496,7 @@ class RecursiveClient(ConfigurableRecClient):
                 parameters,
                 config,
                 mode,
-                self.true_id,
-                self.root,
+                self.relative_id,
                 self.sep,
             )
             return cast(
@@ -513,8 +517,7 @@ def remote_train(
     parameters: NDArrays,
     config: RecClientRuntimeTrainConf,
     mode: str,
-    true_id: Path,
-    root: Path,
+    relative_id: Path,
     sep,
 ) -> FitRes:
     """Train the model remotely on ray."""
@@ -533,10 +536,10 @@ def remote_train(
         ),
         config.run_config | {"device": device},
     )
-    relative_id = true_id.relative_to(root.parent)
+    trained_parameters = get_parameters(net)
 
     return (
-        get_parameters(net),
+        trained_parameters,
         num_examples,
         {f"{relative_id}{sep}{mode}{sep}{key}": val for key, val in metrics.items()},
     )
@@ -552,8 +555,7 @@ def remote_test(
     parameters: NDArrays,
     config: RecClientRuntimeTestConf,
     mode: Optional[str],
-    true_id: Path,
-    root: Path,
+    relative_id,
     sep,
 ) -> EvalRes:
     """Test the model remotely on ray."""
@@ -572,7 +574,6 @@ def remote_test(
             ),
             config.run_config | {"device": device},
         )
-        relative_id = true_id.relative_to(root.parent)
 
         return (
             loss,
@@ -606,8 +607,6 @@ def get_client_fn(
         true_id: Path,
         root: Path,
         parent: Optional[ConfigurableRecClient],
-        train_config_schema: ConfigSchemaGenerator,
-        test_config_schema: ConfigSchemaGenerator,
         recursive_builder: RecursiveBuilder,
     ) -> RecursiveClient:
         """Create a Flower client with a hierarchical structure.
@@ -630,8 +629,6 @@ def get_client_fn(
             client_fn=client_fn,
             fit_metrics_aggregation_fn=fit_metrics_aggregation_fn,
             evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,
-            train_config_schema=train_config_schema,
-            test_config_schema=test_config_schema,
             resources=resources,
             timeout=timeout,
         )

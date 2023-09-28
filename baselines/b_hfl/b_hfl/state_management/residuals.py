@@ -5,8 +5,12 @@ from typing import Any, Dict, Iterable
 
 from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.typing.common_types import FitRes
+from b_hfl.utils.dataset_preparation import get_parameter_convertor
+
+pathify_params = get_parameter_convertor([(str, Path)])
 
 
+@pathify_params
 def get_residuals(
     residuals_manager: Dict[Any, Dict[Any, FitRes]],
     path_dict: FolderHierarchy,
@@ -19,6 +23,7 @@ def get_residuals(
     return residuals_manager[client_id].values()
 
 
+@pathify_params
 def send_residuals(
     residuals_manager: Dict[Any, Dict[Any, FitRes]],
     path_dict: FolderHierarchy,

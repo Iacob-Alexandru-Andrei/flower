@@ -10,13 +10,11 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    Type,
     Union,
 )
 
 import torch
 from flwr.common import NDArrays
-from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
@@ -30,7 +28,6 @@ State = Tuple[int, Dict, Any]
 
 # Everything in FitRes except for the NDArrays
 
-ConfigSchemaGenerator = Callable[[], Type[BaseModel]]
 TransformType = Callable[[Any], torch.Tensor]
 
 DatasetLoader = Callable[[Path], Dataset]
@@ -94,8 +91,6 @@ ClientFN = Callable[
         Path,
         Path,
         Optional[ConfigurableRecClient],
-        ConfigSchemaGenerator,
-        ConfigSchemaGenerator,
         Callable[
             [
                 ConfigurableRecClient,

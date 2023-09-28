@@ -2,13 +2,10 @@
 
 import tarfile
 from pathlib import Path
-from typing import Callable
 
 import gdown
-import hydra
-from omegaconf import DictConfig, OmegaConf
 
-from b_hfl.utils.utils import lazy_wrapper
+from b_hfl.utils.dataset_preparation import get_parameter_convertor
 
 
 def download_femnist(dataset_dir: Path) -> None:
@@ -31,8 +28,11 @@ def download_femnist(dataset_dir: Path) -> None:
     print(f"Dataset downloaded in {dataset_dir}")
 
 
-@hydra.main(config_path="conf", config_name="base", version_base=None)
-def download_and_preprocess(cfg: DictConfig) -> None:
+pathify_params = get_parameter_convertor([(str, Path)])
+
+
+@pathify_params
+def download_and_preprocess(download: bool, download_location: Path) -> None:
     """Download and extract the dataset.
 
     Parameters
@@ -40,18 +40,9 @@ def download_and_preprocess(cfg: DictConfig) -> None:
     cfg : DictConfig
         An omegaconf object that stores the hydra config.
     """
-
     ## 1. print parsed config
-    print(OmegaConf.to_yaml(cfg))
-    if cfg.task.data.preparation.download is False:
+    print("Downloading the dataset")
+    if download is False:
         return
 
-    download_femnist(cfg.task.data.preparation.download_location)
-
-
-if __name__ == "__main__":
-    download_and_preprocess()
-
-
-def get_download_and_preprocess() -> Callable[[], Callable[[DictConfig], None]]:
-    return download_and_preprocess
+    download_femnist(dataset_dir=download_location)

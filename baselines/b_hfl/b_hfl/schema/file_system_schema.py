@@ -21,9 +21,10 @@ class FolderHierarchy(BaseModel):
     root: Path
     parent: Optional["FolderHierarchy"]
     parent_path: Optional[Path]
+    level: int
+    max_level: int
     path: Path
     children: List["FolderHierarchy"] = []
-    levels_to_folder: List[List["FolderHierarchy"]] = []
 
 
 FolderHierarchy.update_forward_refs()

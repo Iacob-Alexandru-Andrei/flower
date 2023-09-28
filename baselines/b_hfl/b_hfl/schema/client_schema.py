@@ -1,6 +1,6 @@
 """Pydnatic Config schemas for datasets."""
 import abc
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import flwr as fl
 from flwr.common import NDArrays
@@ -45,6 +45,7 @@ class ClientTestRuntimeConfig(ClientTestConfig):
 class RecClientConf(BaseModel):
     """Pydantic schema for recursive client configuration."""
 
+    client_config: Union[ClientTrainConfig, ClientTestConfig]
     dataloader_config: Dict
     run_config: Dict
     parameter_config: Dict
@@ -72,6 +73,7 @@ class RecClientTestConf(RecClientConf):
 class RecClientRuntimeConf(RecClientConf):
     """Pydantic schema for recursive client runtime configuration."""
 
+    client_config: Union[ClientTrainRuntimeConfig, ClientTestRuntimeConfig]
     server_round: int
     global_seed: int
     client_seed: int

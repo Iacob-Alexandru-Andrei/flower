@@ -16,6 +16,9 @@ from b_hfl.typing.common_types import (
     FitRes,
 )
 
+class DropoutException(Exception):
+    """Exception raised when a client is dropped out of the tree."""
+
 
 def process_fit_results_and_accumulate_metrics(
     result_metrics: List,
@@ -34,6 +37,10 @@ def process_fit_results_and_accumulate_metrics(
         )
         for future in done:
             futures.remove(future)
+            failure = future.exception()
+            if failure is not None and not isinstance(failure, DropoutException):
+                raise failure
+
             future_result = future.result()
             result_metrics.append(future_result[1:])
             yield future_result
@@ -55,5 +62,9 @@ def process_evaluate_results(
         )
         for future in done:
             futures.remove(future)
+            failure = future.exception()
+            if failure is not None and not isinstance(failure, DropoutException):
+                raise failure
+
             future_result = future.result()
             yield future_result

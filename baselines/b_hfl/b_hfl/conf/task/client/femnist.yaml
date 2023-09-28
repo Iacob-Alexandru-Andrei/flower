@@ -4,7 +4,7 @@ network: CNN
 # Default model training parameters
 batch_size: 16
 num_workers: 4
-shuffle: False
+shuffle: false
 client_learning_rate: 0.01
 weight_decay: 0.001
 
@@ -13,50 +13,59 @@ test_batch_size: 32
 test_num_workers: 4
 
 get_net_generator:
-  _target_: task.femnist.models.get_generate_model
+  _target_: b_hfl.task.femnist.models.get_generate_model
   network: ${task.client.network}
 
+get_anc_node_opt:
+  _target_: b_hfl.node_optimizer.weighted_fed_avg.get_fedavg_weighted_node_opt
+
+get_desc_node_opt:
+  _target_: b_hfl.node_optimizer.weighted_fed_avg.get_fedavg_weighted_node_opt
+
 get_test:
-  _target_: task.femnist.train.test_femnist
+  _target_: b_hfl.task.femnist.train.test_femnist
 
 get_optimizer_generator:
-  _target_: task.femnist.train.optimizer_generator_femnist
+  _target_: b_hfl.task.femnist.train.optimizer_generator_femnist
 
 get_train:
-  _target_: task.task_utils.train_femnist
-
-get_train_config_schema:
-  _target_: task.femnist.config_generation.get_recursive_client_train_configs
-
-get_test_config_schema:
-  _target_: task.femnist.config_generation.get_recursive_client_test_configs
+  _target_: b_hfl.task.femnist.train.train_femnist
 
 # General client per-level cofniguration
 client_train:
   num_rounds: [1, 1, 1, 1]
-  train_children: [True, True, True, False]
-  fit_fraction: [1, 1, 0.1, Null]
-  train_chain: [False, False, False, True]
-  train_proxy: [False, False, False, False]
+  train_children: [true, true, true, false]
+  fit_fraction: [1, 1, 0.1, 0.0]
+  train_chain: [false, false, false, true]
+  epochs: [1, 1, 1, 1]
+  train_proxy: [false, false, false, false]
 
 # Node optimizer per-level configuration
 node_opt:
   anc_alpha: [0.0, 0.5, 0.5, 0.5]
-  desc_alpha: [0.5, 0.5, 0.5, Null]
+  desc_alpha: [0.5, 0.5, 0.5, 0.0]
 
-### These are numbered in reversed direction of data propagation
+### These are numbered in direction of data propagation
 residuals:
   # This means that the root connects to the edge servers above the leaves
-  root_to_leaf_residuals: [1, null, null, null]
+  root_to_leaf_residuals:
+    - [-2]
+    - []
+    - []
+    - []
 
-  # This means that the edge servers connect to the root
-  leaf_to_root_residuals: [null, null, 0, null]
+  # This means that the edge servers connect to the root alone
+  leaf_to_root_residuals:
+    - []
+    - []
+    - [0]
+    - []
 
 client_test:
-  test_children: [False, False, False, False]
-  eval_fraction: [1, 1, 0.1, Null]
-  test_chain: [True, True, True, True]
-  test_proxy: [False, False, False, False]
+  test_children: [false, false, false, false]
+  eval_fraction: [1, 1, 0.1, 0.0]
+  test_chain: [true, true, true, true]
+  test_proxy: [false, false, false, false]
 
 get_config_mapping:
-  _target_: task.femnist.config_generation.get_generate_level_configs
+  _target_: b_hfl.task.femnist.config_generation.get_generate_level_configs

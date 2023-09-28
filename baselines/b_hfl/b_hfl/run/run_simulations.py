@@ -24,7 +24,6 @@ from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.strategy.logging_fed_avg import LoggingFedAvg
 from b_hfl.typing.common_types import (
     ClientFN,
-    ConfigSchemaGenerator,
     DataloaderGenerator,
     DatasetLoader,
     DatasetLoaderNoTransforms,
@@ -59,8 +58,6 @@ def get_fed_eval_fn(
     client_fn: ClientFN,
     recursive_builder: RecursiveBuilder,
     on_evaluate_config_function: LoadConfig,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
 ) -> EvaluateFunc:
     """Get the federated evaluation function."""
     client = client_fn(
@@ -68,8 +65,6 @@ def get_fed_eval_fn(
         root_path,
         root_path.parent,
         None,
-        train_config_schema,
-        test_config_schema,
         recursive_builder,
     )
 
@@ -78,7 +73,7 @@ def get_fed_eval_fn(
         server_round: int, parameters: NDArrays, config: Dict
     ) -> Optional[Tuple[float, Dict]]:
         real_config = on_evaluate_config_function(server_round, root_path)
-        results = client.evaluate(parameters=parameters, config=real_config)
+        results = client.evaluate(parameters, real_config)
         loss, _, metrics = results
         return loss, metrics
 
@@ -108,11 +103,9 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     executor: concurrent.futures.Executor,
 ) -> Tuple[
     ClientFN,
-    Callable[[str], Callable[[FolderHierarchy], RecursiveBuilder]],
+    Callable[[str, str], Callable[[FolderHierarchy], RecursiveBuilder]],
     LoadConfig,
     LoadConfig,
-    ConfigSchemaGenerator,
-    ConfigSchemaGenerator,
     ParametersLoader,
     NetGenerator,
 ]:
@@ -121,21 +114,12 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     They encapsulate all the client logic and state logic this allows evaluation and
     training outside of a simulation without logic duplication.
     """
-    train_config_schema: ConfigSchemaGenerator = call(
-        config=cfg.task.data.get_train_config_schema
+    config_mapping: ConfigFolderHierarchy = call(
+        config=cfg.task.client.get_config_mapping,
+        path_dict=path_dict,
+        cfg=cfg,
+        _recursive_=False,
     )
-
-    test_config_schema: ConfigSchemaGenerator = call(
-        config=cfg.task.data.get_test_config_schema
-    )
-
-    get_config_mapping: Callable[[FolderHierarchy], ConfigFolderHierarchy] = call(
-        config=cfg.task.data.get_config_mapping,
-        train_config_schema=train_config_schema,
-        test_config_schema=test_config_schema,
-    )
-
-    config_mapping: ConfigFolderHierarchy = get_config_mapping(path_dict)
 
     # Turn the logical mapping into a file system mapping
     config_map_to_file_hierarchy(
@@ -149,8 +133,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     )(call(config=cfg.task.client.get_train))
     test: TestFunc = call(config=cfg.task.client.get_test)
 
-    anc_node_opt: NodeOpt = call(config=cfg.client.get_anc_node_opt)
-    desc_node_opt: NodeOpt = call(config=cfg.client.get_desc_node_opt)
+    anc_node_opt: NodeOpt = call(config=cfg.task.client.get_anc_node_opt)
+    desc_node_opt: NodeOpt = call(config=cfg.task.client.get_desc_node_opt)
 
     create_dataloader: DataloaderGenerator = call(cfg.task.data.get_create_dataloader)
 
@@ -192,6 +176,7 @@ def build_hydra_client_fn_and_recursive_builder_generator(
 
     def get_client_recursive_builder_for_parameter_type(
         parameters_file_name: str,
+        experiment_type: str,
     ) -> Callable[[FolderHierarchy], RecursiveBuilder]:
         """Get the recursive builder for a given parameter type."""
 
@@ -214,11 +199,10 @@ def build_hydra_client_fn_and_recursive_builder_generator(
                 residuals_manager={},
                 on_fit_config_fn=on_fit_config_function,
                 on_evaluate_config_fn=on_evaluate_config_function,
+                experiment_type=experiment_type,
                 parameters_file_name=parameters_file_name,
                 parameters_ext=cfg.state.parameters_extension,
                 executor=executor,
-                train_config_schema=train_config_schema,
-                test_config_schema=test_config_schema,
             )
 
         return get_client_recursive_builder
@@ -228,8 +212,6 @@ def build_hydra_client_fn_and_recursive_builder_generator(
         get_client_recursive_builder_for_parameter_type,
         on_fit_config_function,
         on_evaluate_config_function,
-        train_config_schema,
-        test_config_schema,
         load_parameters_file,
         net_generator,
     )
@@ -245,8 +227,6 @@ def get_run_fed_simulation(
     client_output_directory: Path,
     initial_parameters: Parameters,
     executor: concurrent.futures.Executor,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
 ) -> Callable[[FolderHierarchy], History]:
     """Get the function to run a federated simulation."""
 
@@ -262,8 +242,6 @@ def get_run_fed_simulation(
         ] = decorate_client_fn_with_recursive_builder(
             get_client_recursive_builder=get_client_recursive_builder,
             path_dict=path_dict,
-            train_config_schema=train_config_schema,
-            test_config_schema=test_config_schema,
         )(
             client_fn
         )
@@ -273,8 +251,6 @@ def get_run_fed_simulation(
             client_fn=client_fn,
             recursive_builder=root_recursive_builder,
             on_evaluate_config_function=on_evaluate_config_function,
-            train_config_schema=train_config_schema,
-            test_config_schema=test_config_schema,
         )
 
         parameters_path: Path = path_dict.path / f"parameters{cfg.fed_type}.npz"
@@ -346,8 +322,6 @@ def run_fed_simulations_recursive(
     initial_parameters: Parameters,
     recursively_fed_all: bool,
     executor: concurrent.futures.Executor,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
 ) -> List[Tuple[Path, FolderHierarchy, History]]:
     """Run federated simulations recursively.
 
@@ -364,8 +338,6 @@ def run_fed_simulations_recursive(
         client_output_directory=client_output_directory,
         initial_parameters=initial_parameters,
         executor=executor,
-        train_config_schema=train_config_schema,
-        test_config_schema=test_config_schema,
     )
 
     histories: List[Tuple[Path, FolderHierarchy, History]] = []
@@ -385,8 +357,6 @@ def get_train_and_eval_optimal(
     get_recursive_builder: Callable[[FolderHierarchy], RecursiveBuilder],
     on_fit_config_function: LoadConfig,
     on_evaluate_config_function: LoadConfig,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
     initial_parameters: NDArrays,
     seed: int,
 ) -> Callable[[FolderHierarchy], History]:
@@ -398,8 +368,6 @@ def get_train_and_eval_optimal(
             path_dict.path,
             root,
             None,
-            train_config_schema,
-            test_config_schema,
             get_recursive_builder(path_dict),
         )
         config = on_fit_config_function(0, path_dict.path)
@@ -419,8 +387,6 @@ def get_train_and_eval_optimal(
             client_fn=client_fn,
             recursive_builder=get_recursive_builder(path_dict),
             on_evaluate_config_function=on_evaluate_config_function,
-            train_config_schema=train_config_schema,
-            test_config_schema=test_config_schema,
         )
         res = eval_fn(0, trained_parameters, {})
         if res is None:
@@ -441,8 +407,6 @@ def train_and_evaluate_optimal_models_from_hierarchy(
     get_recursive_builder: Callable[[FolderHierarchy], RecursiveBuilder],
     on_fit_config_function: LoadConfig,
     on_evaluate_config_function: LoadConfig,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
     initial_parameters: NDArrays,
     seed: int,
     recursively_train_all: bool,
@@ -454,13 +418,12 @@ def train_and_evaluate_optimal_models_from_hierarchy(
         get_recursive_builder,
         on_fit_config_function,
         on_evaluate_config_function=on_evaluate_config_function,
-        train_config_schema=train_config_schema,
-        test_config_schema=test_config_schema,
         initial_parameters=initial_parameters,
         seed=seed,
     )
     histories: List[Tuple[Path, FolderHierarchy, History]] = []
     for client_dict in unroll_hierarchy(path_dict, recursively_train_all):
+        print("Training optimal model for client: ", client_dict.path)
         histories.append((client_dict.path, client_dict, train_client_fn(client_dict)))
 
     return histories

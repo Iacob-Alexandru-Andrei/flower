@@ -19,12 +19,12 @@ from omegaconf import DictConfig, OmegaConf
 
 import wandb
 from b_hfl.modified_flower.server import History
+from b_hfl.run.preparation import partition
 from b_hfl.run.run_simulations import (
     build_hydra_client_fn_and_recursive_builder_generator,
     run_fed_simulations_recursive,
     train_and_evaluate_optimal_models_from_hierarchy,
 )
-from b_hfl.run.preparation import partition
 from b_hfl.schema.file_system_schema import FolderHierarchy
 from b_hfl.typing.common_types import RecursiveBuilder
 from b_hfl.utils.utils import FileSystemManager, process_histories, wandb_init
@@ -42,13 +42,17 @@ def main(cfg: DictConfig) -> None:
     """
     # 1. Print parsed config
     print(OmegaConf.to_yaml(cfg))
+
     datetime.now()
 
     os.environ["HYDRA_FULL_ERROR"] = "1"
     os.environ["OC_CAUSE"] = "1"
-
     # 2. Download the dataset
-    call(cfg.task.data.get_download_and_preprocess)(cfg)
+    call(
+        config=cfg.task.data.preparation.download_and_preprocess,
+        download=cfg.task.data.preparation.download,
+        download_location=cfg.task.data.preparation.download_location,
+    )
 
     # 3. Partition the dataset
     partition(cfg)
@@ -61,6 +65,7 @@ def main(cfg: DictConfig) -> None:
         settings=wandb.Settings(start_method="thread"),
         config=wandb_config,  # type: ignore
     ) as run:
+        print("Building the folder hierarchy")
         path_dict: FolderHierarchy = call(cfg.task.data.get_folder_hierarchy)
 
         output_directory = Path(
@@ -104,8 +109,6 @@ def main(cfg: DictConfig) -> None:
                 get_client_recursive_builder_for_parameter_type,
                 on_fit_config_function,
                 on_evaluate_config_function,
-                train_config_schema,
-                test_config_schema,
                 load_parameters_file,
                 net_generator,
             ) = build_hydra_client_fn_and_recursive_builder_generator(
@@ -129,10 +132,12 @@ def main(cfg: DictConfig) -> None:
 
             # Train optimal models at every level
             if cfg.train_optimal:
+                print("Training optimal models")
                 get_centralised_client_recursive_builder: Callable[
                     [FolderHierarchy], RecursiveBuilder
                 ] = get_client_recursive_builder_for_parameter_type(
-                    f"parameters{cfg.optimal_type}"
+                    "parameters",
+                    cfg.optimal_type,
                 )
                 optimal_model_histories.extend(
                     train_and_evaluate_optimal_models_from_hierarchy(
@@ -141,8 +146,6 @@ def main(cfg: DictConfig) -> None:
                         get_recursive_builder=get_centralised_client_recursive_builder,
                         on_fit_config_function=on_fit_config_function,
                         on_evaluate_config_function=on_evaluate_config_function,
-                        train_config_schema=train_config_schema,
-                        test_config_schema=test_config_schema,
                         initial_parameters=parameters_to_ndarrays(initial_parameters),
                         seed=cfg.fed.seed,
                         recursively_train_all=cfg.recursively_train_all_optimal_models,
@@ -157,10 +160,12 @@ def main(cfg: DictConfig) -> None:
                 )
             # Train federated models
             if cfg.train_fed:
+                print("Training federated models")
                 get_client_recursive_builder: Callable[
                     [FolderHierarchy], RecursiveBuilder
                 ] = get_client_recursive_builder_for_parameter_type(
-                    f"parameters{cfg.fed_type}"
+                    "parameters",
+                    cfg.fed_type,
                 )
 
                 federated_models_histories.extend(
@@ -175,8 +180,6 @@ def main(cfg: DictConfig) -> None:
                         initial_parameters=initial_parameters,
                         recursively_fed_all=cfg.recursively_fed_simulate_all,
                         executor=executor,
-                        train_config_schema=train_config_schema,
-                        test_config_schema=test_config_schema,
                     )
                 )
 
@@ -201,41 +204,6 @@ def main(cfg: DictConfig) -> None:
                 check=True,
             )
         )
-
-    # 2. Prepare your dataset
-    # here you should call a function in datasets.py that returns
-    # whatever is needed to:
-    # (1) ensure the server can access the dataset used to evaluate your model after
-    # aggregation
-    # (2) tell each client what dataset partitions they should use
-    # (e.g. a this could be a location in the file system,
-    # a list of dataloader, a list of ids to extract
-    # from a dataset, it's up to you)
-
-    # 3. Define your clients
-    # Define a function that returns another function
-    # that will be used during simulation to
-    # instantiate each individual client
-    # client_fn = client.<my_function_that_returns_a_function>()
-
-    # 4. Define your strategy
-    # pass all relevant argument
-    # (including the global dataset used after aggregation,
-    # if needed by your method.)
-    # strategy = instantiate(cfg.strategy, <additional arguments if desired>)
-
-    # 5. Start Simulation
-    # history = fl.simulation.start_simulation(<arguments for simulation>)
-
-    # 6. Save your results
-    # Here you can save the `history` returned by the simulation and include
-    # also other buffers, statistics, info needed to be saved in order to later
-    # on generate the plots you provide in the README.md. You can for instance
-    # access elements that belong to the strategy for example:
-    # data = strategy.get_my_custom_data() -- assuming you have such method defined.
-    # Hydra will generate for you a directory each time you run the code. You
-    # can retrieve the path to that directory with this:
-    # save_path = HydraConfig.get().runtime.output_dir
 
 
 if __name__ == "__main__":

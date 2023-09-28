@@ -101,7 +101,6 @@ class EvictionParameterManager(ABC):
         """Cleanup the parameter manager."""
         for path in self.parameter_dict:
             self.save_parameters(path, None)
-        os.sync()
         self.parameter_dict = {}
 
     def _evict(self) -> None:

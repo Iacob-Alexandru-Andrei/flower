@@ -12,7 +12,7 @@ import shutil
 from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,7 +28,6 @@ from b_hfl.modified_flower.server import History
 from b_hfl.schema.client_schema import ConfigurableRecClient
 from b_hfl.typing.common_types import (
     ClientFN,
-    ConfigSchemaGenerator,
     DatasetLoader,
     LoadConfig,
     ParametersLoader,
@@ -64,8 +63,6 @@ def lazy_wrapper(x: Callable) -> Callable[[], Any]:
 def decorate_client_fn_with_recursive_builder(
     get_client_recursive_builder: Callable[[FolderHierarchy], RecursiveBuilder],
     path_dict: FolderHierarchy,
-    train_config_schema: ConfigSchemaGenerator,
-    test_config_schema: ConfigSchemaGenerator,
 ) -> Callable[[ClientFN], Callable[[str], ConfigurableRecClient]]:
     """Decorate a client function with a recursive builder."""
     root: Path = path_dict.path
@@ -83,8 +80,6 @@ def decorate_client_fn_with_recursive_builder(
                 path_dict.path,
                 root,
                 None,
-                train_config_schema,
-                test_config_schema,
                 recursive_builder,
             )
 
@@ -145,7 +140,7 @@ def save_generic_state_to_file(path: Path, state: State) -> None:
 @lazy_wrapper
 def load_generic_state_file(path: Path) -> State:
     """Save state to a file for arbitrary objects."""
-    with open(path, "wb") as f:
+    with open(path, "rb") as f:
         return pickle.load(f)
 
 
@@ -157,7 +152,7 @@ def load_parameters_file(path: Path) -> NDArrays:
     if path.suffix == ".pt":
         return torch.load(path)
 
-    raise ValueError(f"Unknown parameter format: {path.suffix}")
+    raise ValueError(f"Unknown parameter format: {path}")
 
 
 def get_device() -> torch.device:
@@ -228,7 +223,7 @@ def get_config(config_name: str, seed: int) -> Callable[[int, Path], Dict]:
     return file_on_fit_config_fn
 
 
-def extract_file_from_files(files: Path, file_type) -> Optional[Path]:
+def extract_file_from_files(files: Path, file_type: str) -> Optional[Path]:
     """Extract a file of a given type from a list of files."""
     to_extract: Optional[Path] = None
     any(
@@ -265,19 +260,18 @@ def get_initial_parameters(
 
 
 @lazy_wrapper
-def get_metrics_agg_fn(metrics_list: List[Tuple[int, Metrics]], sep="::") -> Metrics:
+def get_metrics_agg_fn(
+    metrics_list: List[Tuple[int, Metrics]], root: Path = Path("0"), sep="::"
+) -> Metrics:
     """Aggregate fit metrics fof hierarchical clients."""
     result: Metrics = {}
     metrics_dict: Dict = defaultdict(list)
-    root = os.path.commonprefix(
-        [key.split(sep)[0] for _, metric in metrics_list for key in metric.keys()]
-    )[:-1]
 
     num_examples_array: Dict = defaultdict(list)
     for num_examples, metrics in metrics_list:
         for key, value in metrics.items():
             relative_id, mode, metric = key.split(sep)
-
+            print(root, relative_id)
             if root == os.path.dirname(relative_id) and "#" not in metric:
                 metrics_dict[f"{mode}{sep}{metric}"].append(value)
                 num_examples_array[f"{mode}{sep}{metric}"].append(num_examples)
@@ -306,7 +300,6 @@ def cleanup(path_dict: FolderHierarchy, to_clean: List[str]) -> None:
 
     for child in path_dict.children:
         cleanup(child, to_clean)
-    os.sync()
 
 
 def save_files(
@@ -328,7 +321,6 @@ def save_files(
 
     for child in path_dict.children:
         save_files(child, output_dir, ending, to_save)
-    os.sync()
 
 
 def get_save_files_every_round(
@@ -477,4 +469,37 @@ def get_seeded_rng(
     """Get a seeded random number generator."""
     return random.Random(
         hash_combine(global_seed, client_seed, server_round, parent_round)
+    )
+
+
+def get_parent_at_given_level(
+    path_dict: FolderHierarchy, level: int
+) -> FolderHierarchy:
+    """Get the parent of a node at a given level."""
+    while path_dict.level != level:
+        if path_dict.parent is None:
+            raise ValueError("Residual requested above root")
+        path_dict = path_dict.parent
+
+    return path_dict
+
+
+def get_children_at_given_level(
+    path_dict: FolderHierarchy, level: int
+) -> List[FolderHierarchy]:
+    """Get the children of a node at a given level."""
+    if path_dict.level == level:
+        return [path_dict]
+
+    return [
+        inner_child
+        for child in path_dict.children
+        for inner_child in get_children_at_given_level(child, level)
+    ]
+
+
+def get_parameters_norm(ndarrays: NDArrays) -> float:
+    """Get the norm of a list of ndarrays."""
+    return float(
+        np.linalg.norm(np.concatenate([np.ravel(ndarray) for ndarray in ndarrays]))
     )

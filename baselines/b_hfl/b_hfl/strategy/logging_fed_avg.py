@@ -82,11 +82,13 @@ class LoggingFedAvg(FedAvg):
         failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
         """Aggregate fit and save files."""
+        if failures:
+            if isinstance(failures[0], BaseException):
+                raise failures[0]
         res = super().aggregate_fit(server_round, results, failures)
         self.save_files(server_round)
         if res[0] is not None:
             self.save_parameters_to_file(
                 self.parameters_path, parameters_to_ndarrays(res[0])
             )
-            os.sync()
         return res

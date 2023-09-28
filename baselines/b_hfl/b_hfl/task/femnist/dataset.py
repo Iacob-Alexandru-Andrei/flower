@@ -12,11 +12,12 @@ defined here of course.
 
 import csv
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 from PIL import Image
 from PIL.Image import Image as ImageType
+from pydantic import BaseModel
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from b_hfl.typing.common_types import DatasetLoaderNoTransforms, TransformType
@@ -71,15 +72,29 @@ def get_load_femnist_file(input_data_dir: str) -> DatasetLoaderNoTransforms:
     return load_femnist_file
 
 
+class DataloaderConfig(BaseModel):
+    """Pydantic schema for dataloader configuration."""
+
+    batch_size: int
+    num_workers: int
+    shuffle: bool
+    test: bool
+
+
 @lazy_wrapper
-def create_dataloader_femnist(dataset: Dataset, cfg: Dict) -> Optional[DataLoader]:
+def create_dataloader_femnist(
+    dataset: Dataset, cfg: Union[Dict, DataloaderConfig]
+) -> Optional[DataLoader]:
     """Create a dataloader for the femnist dataset."""
+    if isinstance(cfg, Dict):
+        cfg = DataloaderConfig(**cfg)
+
     return DataLoader(
         dataset=dataset,
-        batch_size=cfg["batch_size"],
-        shuffle=cfg["shuffle"],
-        num_workers=cfg["num_workers"],
-        drop_last=not cfg["test"],
+        batch_size=cfg.batch_size,
+        shuffle=cfg.shuffle,
+        num_workers=cfg.num_workers,
+        drop_last=not cfg.test,
     )
 
 
