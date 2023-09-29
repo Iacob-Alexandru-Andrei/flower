@@ -29,6 +29,9 @@ def get_level_config_generator(
     train_chain: List[bool] = cfg.task.client.client_train.train_chain
     epochs: List[int] = cfg.task.client.client_train.epochs
     train_proxy: List[bool] = cfg.task.client.client_train.train_proxy
+    track_parameter_changes: List[
+        bool
+    ] = cfg.task.client.client_train.track_parameter_changes
 
     # Residuals
     root_to_leaf_residuals: List[List[int]] = [
@@ -67,6 +70,7 @@ def get_level_config_generator(
                 train_children=train_children[level],
                 train_chain=train_chain[level],
                 train_proxy=train_proxy[level],
+                track_parameter_changes=track_parameter_changes[level],
                 root_to_leaf_residuals=all_children_at_level,
                 leaf_to_root_residuals=[
                     get_parent_at_given_level(path_dict, parent_level).path

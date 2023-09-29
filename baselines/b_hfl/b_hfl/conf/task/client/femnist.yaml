@@ -35,15 +35,16 @@ get_train:
 client_train:
   num_rounds: [1, 1, 1, 1]
   train_children: [true, true, true, false]
-  fit_fraction: [1, 1, 0.1, 0.0]
+  fit_fraction: [1, 1, 1, 0.0]
   train_chain: [false, false, false, true]
-  epochs: [1, 1, 1, 1]
+  epochs: [1, 1, 1, 5]
   train_proxy: [false, false, false, false]
+  track_parameter_changes: [True, True, True, false]
 
 # Node optimizer per-level configuration
 node_opt:
-  anc_alpha: [0.0, 0.5, 0.5, 0.5]
-  desc_alpha: [0.5, 0.5, 0.5, 0.0]
+  anc_alpha: [0.0, 0.0, 0.0, 0.0]
+  desc_alpha: [0.0, 0.0, 0.0, 0.0]
 
 ### These are numbered in direction of data propagation
 residuals:
@@ -63,7 +64,7 @@ residuals:
 
 client_test:
   test_children: [false, false, false, false]
-  eval_fraction: [1, 1, 0.1, 0.0]
+  eval_fraction: [1.0, 1.0, 0.1, 0.0]
   test_chain: [true, true, true, true]
   test_proxy: [false, false, false, false]
 

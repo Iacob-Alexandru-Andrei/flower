@@ -100,8 +100,9 @@ class Server:
         if res is not None:
             log(
                 INFO,
-                "initial parameters (loss): %s",
+                "initial parameters (loss, other metrics): %s, %s",
                 res[0],
+                res[1],
             )
             history.add_loss_centralized(server_round=0, loss=res[0])
             history.add_metrics_centralized(server_round=0, metrics=res[1])
@@ -112,38 +113,40 @@ class Server:
 
         for current_round in range(1, num_rounds + 1):
             # Train model and replace previous global model
-            if not self.eval_only:
-                res_fit = self.fit_round(server_round=current_round, timeout=timeout)
-                if res_fit:
-                    parameters_prime, _, _ = res_fit  # fit_metrics_aggregated
-                    if parameters_prime:
-                        self.parameters = parameters_prime
-
-                # Evaluate model using strategy implementation
-                res_cen = self.strategy.evaluate(
-                    current_round, parameters=self.parameters
+            res_fit = self.fit_round(
+                server_round=current_round,
+                timeout=timeout,
+            )
+            if res_fit is not None:
+                parameters_prime, fit_metrics, _ = res_fit  # fit_metrics_aggregated
+                if parameters_prime:
+                    self.parameters = parameters_prime
+                history.add_metrics_distributed_fit(
+                    server_round=current_round, metrics=fit_metrics
                 )
-                if res_cen is not None:
-                    loss_cen, metrics_cen = res_cen
-                    log(
-                        INFO,
-                        "fit progress: (%s, %s, %s)",
-                        current_round,
-                        loss_cen,
-                        timeit.default_timer() - start_time,
-                    )
-                    history.add_loss_centralized(
-                        server_round=current_round, loss=loss_cen
-                    )
-                    history.add_metrics_centralized(
-                        server_round=current_round, metrics=metrics_cen
-                    )
+
+            # Evaluate model using strategy implementation
+            res_cen = self.strategy.evaluate(current_round, parameters=self.parameters)
+            if res_cen is not None:
+                loss_cen, metrics_cen = res_cen
+                log(
+                    INFO,
+                    "fit progress: (%s, %s, %s, %s)",
+                    current_round,
+                    loss_cen,
+                    metrics_cen,
+                    timeit.default_timer() - start_time,
+                )
+                history.add_loss_centralized(server_round=current_round, loss=loss_cen)
+                history.add_metrics_centralized(
+                    server_round=current_round, metrics=metrics_cen
+                )
 
             # Evaluate model on a sample of available clients
             res_fed = self.evaluate_round(server_round=current_round, timeout=timeout)
-            if res_fed:
+            if res_fed is not None:
                 loss_fed, evaluate_metrics_fed, _ = res_fed
-                if loss_fed:
+                if loss_fed is not None:
                     history.add_loss_distributed(
                         server_round=current_round, loss=loss_fed
                     )

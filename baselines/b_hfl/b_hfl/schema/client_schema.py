@@ -15,6 +15,7 @@ class ClientTrainConfig(BaseModel):
     train_children: bool
     train_chain: bool
     train_proxy: bool
+    track_parameter_changes: bool
     root_to_leaf_residuals: List[Any]
     leaf_to_root_residuals: List[Any]
 

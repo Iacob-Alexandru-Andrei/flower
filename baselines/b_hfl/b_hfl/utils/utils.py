@@ -38,7 +38,7 @@ from b_hfl.typing.common_types import (
 from b_hfl.utils.dataset_preparation import FolderHierarchy
 
 
-def get_parameters(net: nn.Module) -> NDArrays:
+def get_parameters_copy(net: nn.Module) -> NDArrays:
     """Get the parameters of a network."""
     return [val.cpu().numpy() for _, val in net.state_dict().items()]
 
@@ -271,8 +271,7 @@ def get_metrics_agg_fn(
     for num_examples, metrics in metrics_list:
         for key, value in metrics.items():
             relative_id, mode, metric = key.split(sep)
-            print(root, relative_id)
-            if root == os.path.dirname(relative_id) and "#" not in metric:
+            if str(root) == os.path.dirname(relative_id) and "#" not in metric:
                 metrics_dict[f"{mode}{sep}{metric}"].append(value)
                 num_examples_array[f"{mode}{sep}{metric}"].append(num_examples)
 
@@ -498,8 +497,17 @@ def get_children_at_given_level(
     ]
 
 
+def flatten_ndarrays(ndarrays: NDArrays) -> np.ndarray:
+    return np.concatenate([np.ravel(ndarray) for ndarray in ndarrays])
+
+
 def get_parameters_norm(ndarrays: NDArrays) -> float:
     """Get the norm of a list of ndarrays."""
-    return float(
-        np.linalg.norm(np.concatenate([np.ravel(ndarray) for ndarray in ndarrays]))
-    )
+    return float(np.linalg.norm(flatten_ndarrays(ndarrays)))
+
+
+def get_norm_of_parameter_difference(pre: NDArrays, post: NDArrays) -> float:
+    """Get the norm of the difference between two sets of parameters."""
+    flat_pre = flatten_ndarrays(pre)
+    flat_post = flatten_ndarrays(post)
+    return float(np.linalg.norm(flat_post - flat_pre))

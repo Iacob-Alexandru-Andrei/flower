@@ -9,9 +9,9 @@ node_state_eviction_proportion: 0.5
 
 # saving parameters
 save_frequency: 100
-to_clean: [parameters, history, config]
+to_clean: [parameters, history, config, state]
 save_per_round: [parameters]
-to_save_once: [parameters, config, train, test, history]
+to_save_once: [parameters, config, train, test, history, state]
 
 get_recursive_builder:
   _target_: b_hfl.client.recursive_builder.get_recursive_builder_wrapper

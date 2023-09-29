@@ -4,6 +4,8 @@ Please overwrite `flwr.client.NumPyClient` or `flwr.client.Client` and create a 
 to instantiate your client.
 """
 
+from copy import deepcopy
+import json
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union, cast
 
@@ -47,7 +49,8 @@ from b_hfl.typing.common_types import (
     TrainFunc,
 )
 from b_hfl.utils.utils import (
-    get_parameters,
+    get_norm_of_parameter_difference,
+    get_parameters_copy,
     get_parameters_norm,
     get_seeded_rng,
     set_parameters,
@@ -183,6 +186,10 @@ class RecursiveClient(ConfigurableRecClient):
         if parameter_generator is not None:
             self.client_parameters = parameter_generator(config.parameter_config)
 
+        saved_parameters = None
+        if config.client_config.track_parameter_changes:
+            saved_parameters = deepcopy(self.client_parameters)
+
         self.client_parameters, anc_state = self.anc_node_opt(
             anc_state,
             self.client_parameters,
@@ -192,7 +199,7 @@ class RecursiveClient(ConfigurableRecClient):
                     (
                         n
                         if (n := config.client_config.parent_num_examples) is not None
-                        else 0
+                        else 1
                     ),
                     (
                         m
@@ -204,6 +211,17 @@ class RecursiveClient(ConfigurableRecClient):
             get_residuals(False),
             config.anc_node_optimizer_config,
         )
+        results: Metrics = {}
+
+        if (
+            config.client_config.track_parameter_changes
+            and saved_parameters is not None
+        ):
+            results[
+                f"{self.relative_id}{self.sep}param_diff{self.sep}anc"
+            ] = get_norm_of_parameter_difference(
+                saved_parameters, self.get_parameters(config.get_parameters_config)
+            )
 
         total_examples: Union[float, int] = 0
         prev_round_examples: int = 0
@@ -329,22 +347,38 @@ class RecursiveClient(ConfigurableRecClient):
                 True,
             )
 
-        results: Metrics = {}
-
         children_results_final_round = self.fit_metrics_aggregation_fn(
             children_results,
             self.relative_id,  # type: ignore[arg-type]
         )
 
-        train_self_metrics_final_round = self.fit_metrics_aggregation_fn(
+        train_chain_metrics_final_round = self.fit_metrics_aggregation_fn(
             [
                 (train_chain_examples, train_chain_metrics),
+            ],
+            self.relative_id,  # type: ignore[arg-type]
+        )
+
+        train_proxy_metrics_final_round = self.fit_metrics_aggregation_fn(
+            [
                 (train_proxy_examples, train_proxy_metrics),
             ],
             self.relative_id,  # type: ignore[arg-type]
         )
+
         results.update(children_results_final_round)
-        results.update(train_self_metrics_final_round)
+        results.update(train_chain_metrics_final_round)
+        results.update(train_proxy_metrics_final_round)
+
+        if (
+            config.client_config.track_parameter_changes
+            and saved_parameters is not None
+        ):
+            results[
+                f"{self.relative_id}{self.sep}param_diff{self.sep}desc"
+            ] = get_norm_of_parameter_difference(
+                saved_parameters, self.get_parameters(config.get_parameters_config)
+            )
 
         recursive_step((self.client_parameters, anc_state, desc_state), True)
         return (
@@ -424,13 +458,19 @@ class RecursiveClient(ConfigurableRecClient):
             [(num_examples, metrics) for _, num_examples, metrics in children_results],
             self.relative_id,  # type: ignore[arg-type]
         )
-        results.update(children_results_metrics)
 
-        test_self_metrics = self.evaluate_metrics_aggregation_fn(
-            [(num_examples, test_metrics), (proxy_num_examples, proxy_metrics)],
+        test_chain_metrics = self.evaluate_metrics_aggregation_fn(
+            [(num_examples, test_metrics)],
             self.relative_id,  # type: ignore[arg-type]
         )
-        results.update(test_self_metrics)
+        test_proxy_metrics = self.evaluate_metrics_aggregation_fn(
+            [(proxy_num_examples, proxy_metrics)],
+            self.relative_id,  # type: ignore[arg-type]
+        )
+
+        results.update(children_results_metrics)
+        results.update(test_chain_metrics)
+        results.update(test_proxy_metrics)
 
         return (
             loss,
@@ -443,7 +483,7 @@ class RecursiveClient(ConfigurableRecClient):
         if self.client_parameters is not None:
             return self.client_parameters
 
-        return get_parameters(self.net_generator(config))
+        return get_parameters_copy(self.net_generator(config))
 
     # pylint: disable=unused-argument
     def set_parameters(self, parameters: NDArrays, config: Dict) -> None:
@@ -536,7 +576,7 @@ def remote_train(
         ),
         config.run_config | {"device": device},
     )
-    trained_parameters = get_parameters(net)
+    trained_parameters = get_parameters_copy(net)
 
     return (
         trained_parameters,
