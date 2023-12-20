@@ -39,7 +39,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.history import History
 from flwr.server.strategy import FedAvg, Strategy
-from flwr.server import Server
+from flwr.server.server import Server
 
 FitResultsAndFailures = Tuple[
     List[Tuple[ClientProxy, FitRes]],
