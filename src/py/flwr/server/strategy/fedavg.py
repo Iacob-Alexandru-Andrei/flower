@@ -222,6 +222,8 @@ class FedAvg(Strategy):
         """Aggregate fit results using weighted average."""
         if failures:
             log(DEBUG, "Failures: %s", failures)
+            if isinstance(failures[0], BaseException):
+                raise failures[0]
         if not results:
             return None, {}
         # Do not aggregate if there are failures and failures are not accepted
