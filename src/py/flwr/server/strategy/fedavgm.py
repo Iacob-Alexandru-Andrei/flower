@@ -18,7 +18,7 @@ Paper: arxiv.org/pdf/1909.06335.pdf
 """
 
 
-from logging import WARNING
+from logging import DEBUG, WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from flwr.common import (
@@ -136,6 +136,8 @@ class FedAvgM(FedAvg):
         failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
         """Aggregate fit results using weighted average."""
+        if failures:
+            log(DEBUG, "Failures: %s", failures)
         if not results:
             return None, {}
         # Do not aggregate if there are failures and failures are not accepted
