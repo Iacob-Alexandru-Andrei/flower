@@ -29,7 +29,7 @@ from typing import List, Optional, Tuple
 
 import grpc
 
-from flwr.common import GRPC_MAX_MESSAGE_LENGTH, EventType, event
+from flwr.common import GRPC_MAX_MESSAGE_LENGTH, EventType, event, NDArrays
 from flwr.common.address import parse_address
 from flwr.common.constant import (
     MISSING_EXTRA_REST,
@@ -54,6 +54,8 @@ from flwr.server.history import History
 from flwr.server.server import Server
 from flwr.server.state import StateFactory
 from flwr.server.strategy import FedAvg, Strategy
+from flwr.common.typing import NDArray
+from flwr.server.server_returns_parameters import ReturnParametersServer
 
 ADDRESS_DRIVER_API = "0.0.0.0:9091"
 ADDRESS_FLEET_API_GRPC_RERE = "0.0.0.0:9092"
@@ -194,6 +196,28 @@ def start_server(  # pylint: disable=too-many-arguments,too-many-locals
     return hist
 
 
+def init_defaults_returns_parameters_server(
+    server: Optional[ReturnParametersServer],
+    config: Optional[ServerConfig],
+    strategy: Optional[Strategy],
+    client_manager: Optional[ClientManager],
+) -> Tuple[ReturnParametersServer, ServerConfig]:
+    """Create server instance if none was given."""
+    if server is None:
+        if client_manager is None:
+            client_manager = SimpleClientManager()
+        if strategy is None:
+            strategy = FedAvg()
+        server = ReturnParametersServer(client_manager=client_manager, strategy=strategy)
+    elif strategy is not None:
+        log(WARN, "Both server and strategy were provided, ignoring strategy")
+
+    # Set default config values
+    if config is None:
+        config = ServerConfig()
+
+    return server, config
+
 def init_defaults(
     server: Optional[Server],
     config: Optional[ServerConfig],
@@ -216,6 +240,23 @@ def init_defaults(
 
     return server, config
 
+
+def run_fl_return_parameters(
+    server: ReturnParametersServer,
+    config: ServerConfig,
+) -> Tuple[List[Tuple[int,NDArrays]], History]:
+    """Train a model on the given server and return the History object."""
+    parameters_list, hist = server.fit(num_rounds=config.num_rounds, timeout=config.round_timeout)
+    log(INFO, "app_fit: losses_distributed %s", str(hist.losses_distributed))
+    log(INFO, "app_fit: metrics_distributed_fit %s", str(hist.metrics_distributed_fit))
+    log(INFO, "app_fit: metrics_distributed %s", str(hist.metrics_distributed))
+    log(INFO, "app_fit: losses_centralized %s", str(hist.losses_centralized))
+    log(INFO, "app_fit: metrics_centralized %s", str(hist.metrics_centralized))
+
+    # Graceful shutdown
+    server.disconnect_all_clients(timeout=config.round_timeout)
+
+    return parameters_list,hist
 
 def run_fl(
     server: Server,
