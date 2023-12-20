@@ -263,12 +263,6 @@ def get_recursive_builder(
             config = RecClientRuntimeTrainConf(**in_conf)
             # Syncrhonise client
             config.client_config.parent_round = parent_conf.client_config.parent_round
-            config.client_config.parent_num_examples = (
-                parent_conf.client_config.parent_num_examples
-            )
-            config.client_config.parent_metrics = (
-                parent_conf.client_config.parent_metrics
-            )
 
             return client_fn(
                 cid,

@@ -7,6 +7,7 @@ from typing import (
     Dict,
     Iterable,
     Iterator,
+    List,
     Optional,
     Sequence,
     Tuple,
@@ -14,7 +15,7 @@ from typing import (
 )
 
 import torch
-from flwr.common import NDArrays
+from flwr.common import Metrics, NDArrays
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
@@ -24,7 +25,9 @@ from b_hfl.schema.client_schema import (
     RecClientRuntimeTrainConf,
 )
 
-State = Tuple[int, Dict, Any]
+MetricsAggregationFn = Callable[[List[Tuple[int, Metrics]], Any], Metrics]
+
+State = Tuple[int, Dict]
 
 # Everything in FitRes except for the NDArrays
 
@@ -115,16 +118,25 @@ RecursiveBuilder = Callable[
 
 NetGenerator = Callable[[Dict], nn.Module]
 
-
 StateGenerator = Callable[[Dict], State]
-NodeOptFunction = Callable[
+DescNodeOptFunction = Callable[
     [State, NDArrays, Iterable[FitRes], Iterable[FitRes], Dict],
     Tuple[NDArrays, State],
 ]
 
-NodeOpt = Tuple[
+DescNodeOpt = Tuple[
     StateGenerator,
-    NodeOptFunction,
+    DescNodeOptFunction,
+]
+
+AncNodeOptFunction = Callable[
+    [State, NDArrays, Iterable[NDArrays], Iterable[NDArrays], Dict],
+    Tuple[NDArrays, State],
+]
+
+AncNodeOpt = Tuple[
+    StateGenerator,
+    AncNodeOptFunction,
 ]
 
 

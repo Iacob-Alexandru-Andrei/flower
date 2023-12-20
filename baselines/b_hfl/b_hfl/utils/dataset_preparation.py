@@ -8,7 +8,6 @@ block) that this file should be executed first.
 """
 import csv
 import json
-import os
 from collections import defaultdict
 from copy import deepcopy
 from functools import wraps
@@ -83,7 +82,9 @@ def get_folder_hierarchy(
 
         # Build the tree
         true_max_level = level
-        for _, child_path in enumerate(path.iterdir()):
+        for _, child_path in enumerate(
+            sorted(path.iterdir(), key=lambda x: (len(x.stem), x.stem))
+        ):
             if child_path.is_dir():
                 child_path_dict = rec_get_folder_hierarchy(
                     root=root,

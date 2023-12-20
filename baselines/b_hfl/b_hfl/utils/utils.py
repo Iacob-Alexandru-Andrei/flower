@@ -12,7 +12,7 @@ import shutil
 from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -261,7 +261,7 @@ def get_initial_parameters(
 
 @lazy_wrapper
 def get_metrics_agg_fn(
-    metrics_list: List[Tuple[int, Metrics]], root: Path = Path("0"), sep="::"
+    metrics_list: List[Tuple[int, Metrics]], root: Path, sep="::"
 ) -> Metrics:
     """Aggregate fit metrics fof hierarchical clients."""
     result: Metrics = {}
@@ -269,20 +269,28 @@ def get_metrics_agg_fn(
 
     num_examples_array: Dict = defaultdict(list)
     for num_examples, metrics in metrics_list:
+        num_examples_key = None
         for key, value in metrics.items():
             relative_id, mode, metric = key.split(sep)
-            if str(root) == os.path.dirname(relative_id) and "#" not in metric:
+
+            if (
+                str(root) == os.path.dirname(relative_id)
+                and "num_examples" not in metric
+            ):
                 metrics_dict[f"{mode}{sep}{metric}"].append(value)
                 num_examples_array[f"{mode}{sep}{metric}"].append(num_examples)
+
+            num_examples_key = f"{relative_id}{sep}{mode}{sep}num_examples"
+
+        if num_examples_key is not None:
+            result[num_examples_key] = num_examples
 
         result.update(metrics)
 
     for metric in metrics_dict.keys():
-        result[f"{root}{sep}{metric}#M"] = float(np.mean(metrics_dict[metric]))
-        result[f"{root}{sep}{metric}#WM"] = float(
+        result[f"{root}{sep}{metric}#M"] = float(
             np.average(metrics_dict[metric], weights=num_examples_array[metric])
         )
-        result[f"{root}{sep}{metric}#S"] = float(np.std(metrics_dict[metric]))
 
     return result
 
@@ -506,8 +514,14 @@ def get_parameters_norm(ndarrays: NDArrays) -> float:
     return float(np.linalg.norm(flatten_ndarrays(ndarrays)))
 
 
-def get_norm_of_parameter_difference(pre: NDArrays, post: NDArrays) -> float:
+def get_norm_of_parameter_difference(
+    pre: NDArrays, post: NDArrays
+) -> Tuple[float, float, float]:
     """Get the norm of the difference between two sets of parameters."""
     flat_pre = flatten_ndarrays(pre)
     flat_post = flatten_ndarrays(post)
-    return float(np.linalg.norm(flat_post - flat_pre))
+    return (
+        float(np.linalg.norm(flat_pre)),
+        float(np.linalg.norm(flat_post)),
+        float(np.linalg.norm(flat_post - flat_pre)),
+    )

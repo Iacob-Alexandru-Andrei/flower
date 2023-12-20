@@ -1,5 +1,5 @@
 """Training and testing functions for the FEMNIST dataset."""
-from typing import Dict, Iterator, Tuple, Union, cast
+from typing import Any, Dict, Iterator, Optional, Tuple, Union, cast
 
 import torch
 from pydantic import BaseModel
@@ -63,22 +63,29 @@ def train_femnist(
 
     net.train()
     running_loss, total = 0.0, 0
+    start_loss: Optional[float] = None
+    end_loss: Optional[float] = None
     criterion = torch.nn.CrossEntropyLoss()
 
     optimizer = optimizer_generator(net.parameters(), cast(Dict, cfg))
     for _ in range(cfg.epochs):
-        running_loss = 0.0
-        total = 0
         for data, labels in train_loader:
             data, labels = data.to(cfg.device), labels.to(cfg.device)
 
             optimizer.zero_grad()
             loss = criterion(net(data), labels)
             running_loss += loss.item()
+            start_loss = loss.item() if start_loss is None else start_loss
+            end_loss = loss.item()
             total += labels.size(0)
             loss.backward()
             optimizer.step()
-    return total, {"avg_loss_train": running_loss / total}
+
+    return total, {
+        "loss_avg": running_loss / total,
+        "loss_start": start_loss,
+        "loss_end:": end_loss,
+    }
 
 
 class TestConfig(BaseModel):
@@ -129,5 +136,5 @@ def test_femnist(
     return (
         loss / total,
         total,
-        {"accuracy_test": accuracy, "avg_loss_test": loss / total},
+        {"acc": accuracy, "loss_avg": loss / total},
     )

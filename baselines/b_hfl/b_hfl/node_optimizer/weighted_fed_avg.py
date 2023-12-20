@@ -5,7 +5,7 @@ from flwr.common import NDArrays
 from flwr.server.strategy.aggregate import aggregate
 from pydantic import BaseModel
 
-from b_hfl.typing.common_types import FitRes, NodeOpt, State
+from b_hfl.typing.common_types import FitRes, DescNodeOpt, State
 
 
 class WeightedAvgConfig(BaseModel):
@@ -16,7 +16,7 @@ class WeightedAvgConfig(BaseModel):
 
 def get_fedavg_weighted_node_opt(
     node_aggregate: Callable[[List[Tuple[NDArrays, int]]], NDArrays] = aggregate,
-) -> NodeOpt:
+) -> DescNodeOpt:
     """Get the federated averaging strategy for node optimizer."""
 
     def fedavg_weighted_node_opt(
@@ -51,13 +51,14 @@ def get_fedavg_weighted_node_opt(
         children_parameters = (
             node_aggregate(child_results) if child_results else parameters
         )
-        return (
-            [
-                parent_layer * config.alpha + child_layer * (1 - config.alpha)
-                for parent_layer, child_layer in zip(parameters, children_parameters)
-            ],
-            state,
-        )
+        # return (
+        #     [
+        #         parent_layer * config.alpha + child_layer * (1 - config.alpha)
+        #         for parent_layer, child_layer in zip(parameters, children_parameters)
+        #     ],
+        #     state,
+        # )
+        return children_parameters, state
 
     def initialise_state(_config: Dict) -> State:
         return (0, {}, {})

@@ -33,13 +33,13 @@ get_train:
 
 # General client per-level cofniguration
 client_train:
-  num_rounds: [1, 1, 1, 1]
-  train_children: [true, true, true, false]
-  fit_fraction: [1, 1, 1, 0.0]
-  train_chain: [false, false, false, true]
-  epochs: [1, 1, 1, 1]
-  train_proxy: [false, false, false, false]
-  track_parameter_changes: [true, true, true, true]
+  num_rounds: [1, 1]
+  train_children: [true, false]
+  fit_fraction: [0.12, 0.0]
+  train_chain: [false, true]
+  epochs: [1, 1]
+  train_proxy: [false, false]
+  track_parameter_changes: [true, true]
 
 # Node optimizer per-level configuration
 node_opt:
@@ -50,16 +50,12 @@ node_opt:
 residuals:
   # This means that the root connects to the edge servers above the leaves
   root_to_leaf_residuals:
-    - [-2]
-    - []
     - []
     - []
 
   # This means that the edge servers connect to the root alone
   leaf_to_root_residuals:
     - []
-    - []
-    - [0]
     - []
 
 client_test:

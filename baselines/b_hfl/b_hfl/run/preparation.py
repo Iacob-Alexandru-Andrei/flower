@@ -4,7 +4,7 @@ from pathlib import Path
 
 import hydra
 from hydra.utils import call
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from b_hfl.utils.dataset_preparation import (
     child_map_to_file_hierarchy,

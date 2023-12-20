@@ -30,7 +30,7 @@ from b_hfl.typing.common_types import (
     EvaluateFunc,
     LoadConfig,
     NetGenerator,
-    NodeOpt,
+    DescNodeOpt,
     ParametersLoader,
     RecursiveBuilder,
     StateLoader,
@@ -133,8 +133,8 @@ def build_hydra_client_fn_and_recursive_builder_generator(
     )(call(config=cfg.task.client.get_train))
     test: TestFunc = call(config=cfg.task.client.get_test)
 
-    anc_node_opt: NodeOpt = call(config=cfg.task.client.get_anc_node_opt)
-    desc_node_opt: NodeOpt = call(config=cfg.task.client.get_desc_node_opt)
+    anc_node_opt: DescNodeOpt = call(config=cfg.task.client.get_anc_node_opt)
+    desc_node_opt: DescNodeOpt = call(config=cfg.task.client.get_desc_node_opt)
 
     create_dataloader: DataloaderGenerator = call(cfg.task.data.get_create_dataloader)
 
@@ -280,10 +280,12 @@ def get_run_fed_simulation(
             evaluate_fn=evaluate_fn,
             initial_parameters=initial_parameters,
             accept_failures=False,
-            fit_metrics_aggregation_fn=call(cfg.fed.get_on_fit_metrics_agg_fn),
-            evaluate_metrics_aggregation_fn=call(
+            fit_metrics_aggregation_fn=lambda metrics_list: call(
+                cfg.fed.get_on_fit_metrics_agg_fn
+            )(metrics_list, path_dict.path),
+            evaluate_metrics_aggregation_fn=lambda metrics_list: call(
                 cfg.fed.get_on_evaluate_metrics_agg_fn
-            ),
+            )(metrics_list, path_dict.path),
         )
         # Solve from here down
         server: Server = Server(

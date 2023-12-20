@@ -5,7 +5,6 @@ to instantiate your client.
 """
 
 from copy import deepcopy
-import json
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union, cast
 
@@ -15,17 +14,17 @@ from flwr.common import (
     GetPropertiesIns,
     GetPropertiesRes,
     Metrics,
-    MetricsAggregationFn,
     NDArrays,
     Properties,
     Status,
 )
 from torch.utils.data import Dataset
 
-import b_hfl.utils.utils as utils
-from b_hfl.client.async_collect import (
+from b_hfl.client.async_train import (
     process_evaluate_results,
     process_fit_results_and_accumulate_metrics,
+    remote_test,
+    remote_train,
 )
 from b_hfl.schema.client_schema import (
     ConfigurableRecClient,
@@ -41,19 +40,21 @@ from b_hfl.typing.common_types import (
     EvalRes,
     FitRecursiveStructure,
     FitRes,
+    GetResiduals,
+    MetricsAggregationFn,
     NetGenerator,
-    NodeOpt,
+    DescNodeOpt,
     RecursiveBuilder,
     RecursiveStructure,
+    SendResiduals,
+    State,
     TestFunc,
     TrainFunc,
 )
 from b_hfl.utils.utils import (
     get_norm_of_parameter_difference,
     get_parameters_copy,
-    get_parameters_norm,
     get_seeded_rng,
-    set_parameters,
 )
 
 
@@ -72,8 +73,8 @@ class RecursiveClient(ConfigurableRecClient):
         root: Path,
         parent: Optional[ConfigurableRecClient],
         net_generator: NetGenerator,
-        anc_node_opt: NodeOpt,
-        desc_node_opt: NodeOpt,
+        anc_node_opt: DescNodeOpt,
+        desc_node_opt: DescNodeOpt,
         train: TrainFunc,
         test: TestFunc,
         create_dataloader: DataloaderGenerator,
@@ -142,13 +143,6 @@ class RecursiveClient(ConfigurableRecClient):
         else:
             config = in_config
 
-        rng = get_seeded_rng(
-            global_seed=config.global_seed,
-            client_seed=config.client_seed,
-            server_round=config.server_round,
-            parent_round=config.client_config.parent_round,
-        )
-
         recursive_structure: RecursiveStructure = self.recursive_builder(
             self, self.client_fn, False
         )
@@ -169,6 +163,7 @@ class RecursiveClient(ConfigurableRecClient):
         children_res_generator_list = cast(
             ClientFitFutureList, children_res_generator_list
         )
+
         anc_state = (
             anc_state_loader(config.state_loader_config)
             if anc_state_loader is not None
@@ -181,47 +176,38 @@ class RecursiveClient(ConfigurableRecClient):
             else self.desc_state_generator(config.state_generator_config)
         )
 
-        self.client_parameters = parameters
+        self.set_parameters(parameters, config.get_parameters_config)
 
         if parameter_generator is not None:
-            self.client_parameters = parameter_generator(config.parameter_config)
+            self.set_parameters(
+                parameter_generator(config.parameter_config),
+                config.get_parameters_config,
+            )
 
         saved_parameters = None
         if config.client_config.track_parameter_changes:
-            saved_parameters = deepcopy(self.client_parameters)
+            saved_parameters = deepcopy(
+                self.get_parameters(config.get_parameters_config)
+            )
 
-        self.client_parameters, anc_state = self.anc_node_opt(
+        merged_parameters, anc_state = self.anc_node_opt(
             anc_state,
-            self.client_parameters,
+            self.get_parameters(config.get_parameters_config),
             [
                 (
                     parameters,
-                    (
-                        n
-                        if (n := config.client_config.parent_num_examples) is not None
-                        else 1
-                    ),
-                    (
-                        m
-                        if (m := config.client_config.parent_metrics) is not None
-                        else {}
-                    ),
+                    (1),
+                    ({}),
                 )
             ],
             get_residuals(False),
             config.anc_node_optimizer_config,
         )
+        self.set_parameters(merged_parameters, config.get_parameters_config)
+
         results: Metrics = {}
 
-        if (
-            config.client_config.track_parameter_changes
-            and saved_parameters is not None
-        ):
-            results[
-                f"{self.relative_id}{self.sep}param_diff{self.sep}anc"
-            ] = get_norm_of_parameter_difference(
-                saved_parameters, self.get_parameters(config.get_parameters_config)
-            )
+        saved_parameters = self._add_norm(saved_parameters, results, "anc", config)
 
         total_examples: Union[float, int] = 0
         prev_round_examples: int = 0
@@ -232,70 +218,30 @@ class RecursiveClient(ConfigurableRecClient):
         train_proxy_metrics: Dict = {}
         train_chain_metrics: Dict = {}
 
-        merged_prev_metrics = {
-            "examples": {
-                "round": 0,
-                "chain": train_chain_examples,
-                "proxy": train_proxy_examples,
-            },
-            "metrics": {
-                "children": children_results,
-                "chain": train_chain_metrics,
-                "proxy": train_proxy_metrics,
-            },
-        }
-
         for i in range(config.client_config.num_rounds):
             # Synchronise clients
             # used to set seeds for reproducibility
-            desc_state = (prev_round_examples, merged_prev_metrics, desc_state[-1])
+            desc_state = (prev_round_examples, desc_state[-1])
 
             config.client_config.parent_round = i
-            config.client_config.parent_num_examples = prev_round_examples
-            config.client_config.parent_metrics = merged_prev_metrics
-
-            round_examples: int = 0
-
-            children_results = []
-
-            if config.client_config.train_children:
-                for client_id in config.client_config.root_to_leaf_residuals:
-                    send_residual(
-                        client_id,
-                        (
-                            self.client_parameters,
-                            int(prev_round_examples),
-                            merged_prev_metrics,
-                        ),
-                        False,
-                    )
-                selected_children: ClientFitFutureList = rng.sample(
-                    children_res_generator_list,
-                    int(
-                        config.client_config.fit_fraction
-                        * len(children_res_generator_list)
-                    ),
-                )
-
-                self.client_parameters, desc_state = self.desc_node_opt(
-                    desc_state,
-                    self.get_parameters(config.get_parameters_config),
-                    process_fit_results_and_accumulate_metrics(
-                        children_results,
-                        self.get_parameters(config.get_parameters_config),
-                        config,
-                        selected_children,
-                    ),
-                    get_residuals(True),
-                    config.desc_node_optimizer_config,
-                )
-                round_examples += int(
-                    sum((num_examples for num_examples, _ in children_results))
-                    / len(children_results)
-                )
 
             (
-                self.client_parameters,
+                parameters_updated,
+                round_examples,
+                children_results,
+            ), desc_state = self._train_children(
+                desc_state=desc_state,
+                children_res_generator_list=children_res_generator_list,
+                send_residual=send_residual,
+                get_residuals=get_residuals,
+                prev_round_examples=prev_round_examples,
+                config=config,
+            )
+
+            self.set_parameters(parameters_updated, config.get_parameters_config)
+
+            (
+                trained_parameters,
                 train_chain_examples,
                 train_chain_metrics,
             ) = self._train(
@@ -305,10 +251,12 @@ class RecursiveClient(ConfigurableRecClient):
                 mode="chain" if config.client_config.train_chain else None,
             )
 
+            self.set_parameters(trained_parameters, config.get_parameters_config)
+
             round_examples += train_chain_examples
 
             (
-                self.client_parameters,
+                trained_parameters,
                 train_proxy_examples,
                 train_proxy_metrics,
             ) = self._train(
@@ -317,34 +265,19 @@ class RecursiveClient(ConfigurableRecClient):
                 config,
                 mode="proxy" if config.client_config.train_proxy else None,
             )
+            self.set_parameters(trained_parameters, config.get_parameters_config)
+
             round_examples += train_proxy_examples
             total_examples += round_examples
             prev_round_examples = round_examples
 
-            merged_prev_metrics = {
-                "examples": {
-                    "round": round_examples,
-                    "chain": train_chain_examples,
-                    "proxy": train_proxy_examples,
-                },
-                "metrics": {
-                    "children": children_results,
-                    "chain": train_chain_metrics,
-                    "proxy": train_proxy_metrics,
-                },
-            }
-
-            self.client_parameters = self.get_parameters(config.get_parameters_config)
             recursive_step(
-                (self.client_parameters, anc_state, desc_state),
+                (
+                    self.get_parameters(config.get_parameters_config),
+                    anc_state,
+                    desc_state,
+                ),
                 False,
-            )
-
-        for client_id in config.client_config.leaf_to_root_residuals:
-            send_residual(
-                client_id,
-                (self.client_parameters, int(total_examples), merged_prev_metrics),
-                True,
             )
 
         children_results_final_round = self.fit_metrics_aggregation_fn(
@@ -370,17 +303,12 @@ class RecursiveClient(ConfigurableRecClient):
         results.update(train_chain_metrics_final_round)
         results.update(train_proxy_metrics_final_round)
 
-        if (
-            config.client_config.track_parameter_changes
-            and saved_parameters is not None
-        ):
-            results[
-                f"{self.relative_id}{self.sep}param_diff{self.sep}desc"
-            ] = get_norm_of_parameter_difference(
-                saved_parameters, self.get_parameters(config.get_parameters_config)
-            )
+        saved_parameters = self._add_norm(saved_parameters, results, "desc", config)
 
-        recursive_step((self.client_parameters, anc_state, desc_state), True)
+        recursive_step(
+            (self.get_parameters(config.get_parameters_config), anc_state, desc_state),
+            True,
+        )
         return (
             self.get_parameters(config.get_parameters_config),
             int(float(total_examples) / config.client_config.num_rounds),
@@ -424,10 +352,13 @@ class RecursiveClient(ConfigurableRecClient):
             ClientEvaluateFutureList, children_res_generator_list
         )
 
-        self.client_parameters = parameters
+        self.set_parameters(parameters, config.get_parameters_config)
 
         if parameter_generator is not None:
-            self.client_parameters = parameter_generator(config.parameter_config)
+            self.set_parameters(
+                parameter_generator(config.parameter_config),
+                config.get_parameters_config,
+            )
 
         selected_children = rng.sample(
             children_res_generator_list,
@@ -456,16 +387,16 @@ class RecursiveClient(ConfigurableRecClient):
         results: Metrics = {}
         children_results_metrics = self.evaluate_metrics_aggregation_fn(
             [(num_examples, metrics) for _, num_examples, metrics in children_results],
-            self.relative_id,  # type: ignore[arg-type]
+            self.relative_id,
         )
 
         test_chain_metrics = self.evaluate_metrics_aggregation_fn(
             [(num_examples, test_metrics)],
-            self.relative_id,  # type: ignore[arg-type]
+            self.relative_id,
         )
         test_proxy_metrics = self.evaluate_metrics_aggregation_fn(
             [(proxy_num_examples, proxy_metrics)],
-            self.relative_id,  # type: ignore[arg-type]
+            self.relative_id,
         )
 
         results.update(children_results_metrics)
@@ -489,6 +420,63 @@ class RecursiveClient(ConfigurableRecClient):
     def set_parameters(self, parameters: NDArrays, config: Dict) -> None:
         """Change the parameters of the model using the given ones."""
         self.client_parameters = parameters
+
+    def _train_children(
+        self,
+        desc_state: State,
+        children_res_generator_list: ClientFitFutureList,
+        send_residual: SendResiduals,
+        get_residuals: GetResiduals,
+        prev_round_examples: int,
+        config: RecClientRuntimeTrainConf,
+    ) -> Tuple[Tuple[NDArrays, int, List[Tuple[int, Dict]]], State]:
+        if config.client_config.train_children:
+            rng = get_seeded_rng(
+                global_seed=config.global_seed,
+                client_seed=config.client_seed,
+                server_round=config.server_round,
+                parent_round=config.client_config.parent_round,
+            )
+            for client_id in config.client_config.root_to_leaf_residuals:
+                send_residual(
+                    client_id,
+                    (
+                        self.get_parameters(config.get_parameters_config),
+                        int(prev_round_examples),
+                        {},
+                    ),
+                    False,
+                )
+
+            selected_children: ClientFitFutureList = rng.sample(
+                children_res_generator_list,
+                int(
+                    config.client_config.fit_fraction * len(children_res_generator_list)
+                ),
+            )
+
+            children_results: List[Tuple[int, Dict]] = []
+            parameters_updated, desc_state = self.desc_node_opt(
+                desc_state,
+                self.get_parameters(config.get_parameters_config),
+                process_fit_results_and_accumulate_metrics(
+                    children_results,
+                    self.get_parameters(config.get_parameters_config),
+                    config,
+                    selected_children,
+                ),
+                get_residuals(True),
+                config.desc_node_optimizer_config,
+            )
+
+            round_examples = int(
+                sum((num_examples for num_examples, _ in children_results))
+                / len(children_results)
+            )
+
+            return (parameters_updated, round_examples, children_results), desc_state
+
+        return (self.get_parameters(config.get_parameters_config), 0, []), desc_state
 
     def _train(
         self,
@@ -546,92 +534,34 @@ class RecursiveClient(ConfigurableRecClient):
 
         return 0.0, 0, {}
 
+    def _add_norm(
+        self,
+        saved_parameters: Optional[NDArrays],
+        results: Dict,
+        mode: str,
+        config: RecClientRuntimeTrainConf,
+    ) -> Optional[NDArrays]:
+        if (
+            config.client_config.track_parameter_changes
+            and saved_parameters is not None
+        ):
+            (
+                results[f"{self.relative_id}{self.sep}norm_pre{self.sep}anc"],
+                results[f"{self.relative_id}{self.sep}norm_post{self.sep}anc"],
+                results[f"{self.relative_id}{self.sep}norm_diff{self.sep}anc"],
+            ) = get_norm_of_parameter_difference(
+                saved_parameters, self.get_parameters(config.get_parameters_config)
+            )
 
-# pylint: disable=too-many-locals,too-many-arguments
-@ray.remote
-def remote_train(
-    net_generator: NetGenerator,
-    train_func: TrainFunc,
-    train_dataset_generator: Callable[[Dict], Dataset],
-    create_dataloader: DataloaderGenerator,
-    parameters: NDArrays,
-    config: RecClientRuntimeTrainConf,
-    mode: str,
-    relative_id: Path,
-    sep,
-) -> FitRes:
-    """Train the model remotely on ray."""
-    net = net_generator(config.net_config)
-
-    device = utils.get_device()
-
-    set_parameters(net, parameters, to_copy=True)
-    net.to(device)
-    net.train()
-    num_examples, metrics = train_func(
-        net,
-        create_dataloader(
-            train_dataset_generator(config.dataset_generator_config),
-            config.dataloader_config | {"test": False},
-        ),
-        config.run_config | {"device": device},
-    )
-    trained_parameters = get_parameters_copy(net)
-
-    return (
-        trained_parameters,
-        num_examples,
-        {f"{relative_id}{sep}{mode}{sep}{key}": val for key, val in metrics.items()},
-    )
-
-
-# pylint: disable=too-many-locals,too-many-arguments
-@ray.remote
-def remote_test(
-    net_generator: NetGenerator,
-    test_func: TestFunc,
-    test_dataset_generator: Callable[[Dict], Dataset],
-    create_dataloader: DataloaderGenerator,
-    parameters: NDArrays,
-    config: RecClientRuntimeTestConf,
-    mode: Optional[str],
-    relative_id,
-    sep,
-) -> EvalRes:
-    """Test the model remotely on ray."""
-    if test_dataset_generator is not None and mode is not None:
-        net = net_generator(config.net_config)
-        device = utils.get_device()
-
-        set_parameters(net, parameters, to_copy=True)
-        net.to(device)
-        net.eval()
-        loss, num_examples, metrics = test_func(
-            net,
-            create_dataloader(
-                test_dataset_generator(config.dataset_generator_config),
-                config.dataloader_config | {"test": False},
-            ),
-            config.run_config | {"device": device},
-        )
-
-        return (
-            loss,
-            num_examples,
-            {
-                f"{relative_id}{sep}{key}{sep}{mode}": val
-                for key, val in metrics.items()
-            },
-        )
-
-    return 0.0, 0, {}
+            return deepcopy(self.get_parameters(config.get_parameters_config))
+        return None
 
 
 # pylint: disable=too-many-arguments
 def get_client_fn(
     net_generator: NetGenerator,
-    anc_node_opt: NodeOpt,
-    desc_node_opt: NodeOpt,
+    anc_node_opt: DescNodeOpt,
+    desc_node_opt: DescNodeOpt,
     train: TrainFunc,
     test: TestFunc,
     create_dataloader: DataloaderGenerator,

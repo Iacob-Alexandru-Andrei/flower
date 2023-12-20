@@ -1,6 +1,5 @@
 """State management for node optimizers."""
 import abc
-import os
 from abc import ABC
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, cast

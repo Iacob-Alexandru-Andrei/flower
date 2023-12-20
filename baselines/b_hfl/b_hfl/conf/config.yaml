@@ -17,8 +17,10 @@ train_fed: true
 recursively_fed_simulate_all: false
 fed_name: _fed
 fed_type: ${fed_name}_root_${task.data.client_folder}
-use_wandb: true
+
 eval_only: false
+
+use_wandb: true
 
 wandb:
   mode: enabled

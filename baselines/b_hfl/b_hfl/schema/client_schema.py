@@ -24,8 +24,6 @@ class ClientTrainRuntimeConfig(ClientTrainConfig):
     """Pydantic schema for client runtime training configuration."""
 
     parent_round: Optional[int]
-    parent_num_examples: Optional[int]
-    parent_metrics: Optional[Dict]
 
 
 class ClientTestConfig(BaseModel):
