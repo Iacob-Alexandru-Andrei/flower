@@ -25,6 +25,7 @@ from .client_manager import ClientManager as ClientManager
 from .client_manager import SimpleClientManager as SimpleClientManager
 from .history import History as History
 from .server import Server as Server
+from .server_returns_parameters import ReturnParametersServer 
 
 __all__ = [
     "ClientManager",
@@ -33,6 +34,7 @@ __all__ = [
     "run_fleet_api",
     "run_server",
     "Server",
+    "ReturnParametersServer",
     "ServerConfig",
     "SimpleClientManager",
     "start_server",

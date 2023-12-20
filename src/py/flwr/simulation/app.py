@@ -22,8 +22,6 @@ import warnings
 from logging import ERROR, INFO
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
-import ray
-from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
 from flwr.client import ClientFn
 from flwr.common import EventType, event, NDArrays
@@ -304,6 +302,9 @@ def start_simulation(
         Object containing metrics from training.
     """  # noqa: E501
     # pylint: disable-msg=too-many-locals
+
+    import ray
+    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
     event(
         EventType.START_SIMULATION_ENTER,
         {"num_clients": len(clients_ids) if clients_ids is not None else num_clients},
