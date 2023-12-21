@@ -63,7 +63,7 @@ class ReturnParametersServer(Server):
         *,
         client_manager: ClientManager,
         strategy: Optional[Strategy] = None,
-        return_all_parameters: bool = False,
+        return_all_parameters: bool = True,
     ) -> None:
         super().__init__(client_manager=client_manager,
                          strategy=strategy)

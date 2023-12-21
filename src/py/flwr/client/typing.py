@@ -21,6 +21,7 @@ from flwr.client.workload_state import WorkloadState
 from flwr.proto.task_pb2 import TaskIns, TaskRes
 
 from .client import Client as Client
+from .numpy_client import NumPyClient
 
 
 @dataclass
@@ -41,4 +42,5 @@ class Bwd:
 
 FlowerCallable = Callable[[Fwd], Bwd]
 ClientFn = Callable[[str], Client]
+ClientFnNumpy = Callable[[str], NumPyClient]
 Layer = Callable[[Fwd, FlowerCallable], Bwd]
