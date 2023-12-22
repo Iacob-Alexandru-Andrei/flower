@@ -16,6 +16,7 @@
 
 
 import concurrent.futures
+from copy import deepcopy
 import timeit
 from logging import DEBUG, INFO
 from typing import Dict, List, Optional, Tuple, Union
@@ -163,6 +164,9 @@ class ReturnParametersServer(Server):
             parameters=self.parameters,
             client_manager=self._client_manager,
         )
+        client_instructions = [ (client, deepcopy(ins)) for client, ins in client_instructions]
+
+
         if not client_instructions:
             log(INFO, "evaluate_round %s: no clients selected, cancel", server_round)
             return None
@@ -211,6 +215,7 @@ class ReturnParametersServer(Server):
             parameters=self.parameters,
             client_manager=self._client_manager,
         )
+        client_instructions = [ (client, deepcopy(ins)) for client, ins in client_instructions]
 
         if not client_instructions:
             log(INFO, "fit_round %s: no clients selected, cancel", server_round)
