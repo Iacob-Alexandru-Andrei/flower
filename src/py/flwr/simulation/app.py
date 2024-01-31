@@ -20,7 +20,7 @@ import threading
 import traceback
 import warnings
 from logging import ERROR, INFO
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import ray
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
@@ -85,6 +85,8 @@ def start_simulation(
     actor_type: Type[VirtualClientEngineActor] = DefaultActor,
     actor_kwargs: Optional[Dict[str, Any]] = None,
     actor_scheduling: Union[str, NodeAffinitySchedulingStrategy] = "DEFAULT",
+    pool: Optional[VirtualClientEngineActorPool] = None,
+    create_actor_fn: Callable[[None], Type[VirtualClientEngineActor]] | None = None,
 ) -> History:
     """Start a Ray-based Flower simulation server.
 
@@ -207,8 +209,10 @@ def start_simulation(
     if ray.is_initialized() and not keep_initialised:
         ray.shutdown()
 
-    # Initialize Ray
-    ray.init(**ray_init_args)
+    if not ray.is_initialized():
+        # Initialize Ray
+        ray.init(**ray_init_args)
+        
     cluster_resources = ray.cluster_resources()
     log(
         INFO,
@@ -247,20 +251,25 @@ def start_simulation(
 
     actor_args = {} if actor_kwargs is None else actor_kwargs
 
-    # An actor factory. This is called N times to add N actors
-    # to the pool. If at some point the pool can accommodate more actors
-    # this will be called again.
-    def create_actor_fn() -> Type[VirtualClientEngineActor]:
-        return actor_type.options(  # type: ignore
-            **client_resources,
-            scheduling_strategy=actor_scheduling,
-        ).remote(**actor_args)
+    
+    if create_actor_fn is None:
+        # An actor factory. This is called N times to add N actors
+        # to the pool. If at some point the pool can accommodate more actors
+        # this will be called again.
+        def actor_fn() -> Type[VirtualClientEngineActor]:
+            return actor_type.options(  # type: ignore
+                **client_resources,
+                scheduling_strategy=actor_scheduling,
+            ).remote(**actor_args)
+        create_actor_fn = actor_fn
+    
 
-    # Instantiate ActorPool
-    pool = VirtualClientEngineActorPool(
-        create_actor_fn=create_actor_fn,
-        client_resources=client_resources,
-    )
+    if pool is None:
+        # Instantiate ActorPool
+        pool = VirtualClientEngineActorPool(
+            create_actor_fn=create_actor_fn,
+            client_resources=client_resources,
+        )
 
     f_stop = threading.Event()
 

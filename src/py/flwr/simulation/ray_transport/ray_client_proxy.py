@@ -241,7 +241,7 @@ class RayActorClientProxy(ClientProxy):
         return common.DisconnectRes(reason="")  # Nothing to do here (yet)
 
 
-# @ray.remote
+@ray.remote
 def launch_and_get_properties(
     client_fn: ClientFn, cid: str, get_properties_ins: common.GetPropertiesIns
 ) -> common.GetPropertiesRes:
@@ -253,7 +253,7 @@ def launch_and_get_properties(
     )
 
 
-# @ray.remote
+@ray.remote
 def launch_and_get_parameters(
     client_fn: ClientFn, cid: str, get_parameters_ins: common.GetParametersIns
 ) -> common.GetParametersRes:
