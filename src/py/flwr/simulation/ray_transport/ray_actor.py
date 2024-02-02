@@ -133,7 +133,7 @@ def pool_size_from_resources(client_resources: Dict[str, Union[int, float]]) -> 
 
         num_cpus = node_resources["CPU"]
         num_gpus = node_resources.get("GPU", 0)  # There might not be GPU
-        num_actors = int(num_cpus / (client_resources["num_cpus"]-1))
+        num_actors = int(num_cpus / (max(1,client_resources["num_cpus"]-1)))
 
         # If a GPU is present and client resources do require one
         if "num_gpus" in client_resources.keys() and client_resources["num_gpus"] > 0.0:
