@@ -175,7 +175,12 @@ class RayActorClientProxy(ClientProxy):
                 get_properties_ins=ins,
             )
 
-        return get_properties(self.client_fn(self.cid))
+        res = self._submit_job(get_properties, timeout)
+
+        return cast(
+            common.GetPropertiesRes,
+            res,
+        )
 
     def get_parameters(
         self, ins: common.GetParametersIns, timeout: Optional[float]
@@ -188,7 +193,12 @@ class RayActorClientProxy(ClientProxy):
                 get_parameters_ins=ins,
             )
 
-        return get_parameters(self.client_fn(self.cid))
+        res = self._submit_job(get_parameters, timeout)
+
+        return cast(
+            common.GetParametersRes,
+            res,
+        )
 
     def fit(self, ins: common.FitIns, timeout: Optional[float]) -> common.FitRes:
         """Train model parameters on the locally held dataset."""
@@ -199,7 +209,12 @@ class RayActorClientProxy(ClientProxy):
                 fit_ins=ins,
             )
 
-        return fit(self.client_fn(self.cid))
+        res = self._submit_job(fit, timeout)
+
+        return cast(
+            common.FitRes,
+            res,
+        )
 
     def evaluate(
         self, ins: common.EvaluateIns, timeout: Optional[float]
@@ -212,7 +227,12 @@ class RayActorClientProxy(ClientProxy):
                 evaluate_ins=ins,
             )
 
-        return evaluate(self.client_fn(self.cid))
+        res = self._submit_job(evaluate, timeout)
+
+        return cast(
+            common.EvaluateRes,
+            res,
+        )
 
     def reconnect(
         self, ins: common.ReconnectIns, timeout: Optional[float]

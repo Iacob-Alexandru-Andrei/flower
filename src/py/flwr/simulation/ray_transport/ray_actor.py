@@ -114,7 +114,6 @@ def pool_size_from_resources(client_resources: Dict[str, Union[int, float]]) -> 
     For this we consider the resources available on each node and those required per
     client.
     """
-    return 2
     total_num_actors = 0
 
     # We calculate the number of actors that fit in a node per node basis. This is
@@ -134,7 +133,7 @@ def pool_size_from_resources(client_resources: Dict[str, Union[int, float]]) -> 
 
         num_cpus = node_resources["CPU"]
         num_gpus = node_resources.get("GPU", 0)  # There might not be GPU
-        num_actors = int(num_cpus / (max(1,client_resources["num_cpus"]-1)))
+        num_actors = int(num_cpus / client_resources["num_cpus"])
 
         # If a GPU is present and client resources do require one
         if "num_gpus" in client_resources.keys() and client_resources["num_gpus"] > 0.0:
