@@ -115,6 +115,7 @@ def pool_size_from_resources(client_resources: Dict[str, Union[int, float]]) -> 
     client.
     """
     total_num_actors = 0
+    return 2
 
     # We calculate the number of actors that fit in a node per node basis. This is
     # the right way of doing it otherwise situations like the following arise: imagine
