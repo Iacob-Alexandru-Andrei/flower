@@ -114,6 +114,7 @@ def pool_size_from_resources(client_resources: Dict[str, Union[int, float]]) -> 
     For this we consider the resources available on each node and those required per
     client.
     """
+    return 2
     total_num_actors = 0
 
     # We calculate the number of actors that fit in a node per node basis. This is
@@ -199,8 +200,7 @@ class VirtualClientEngineActorPool(ActorPool):
         if actor_list is None:
             # Figure out how many actors can be created given the cluster resources
             # and the resources the user indicates each VirtualClient will need
-            # num_actors = pool_size_from_resources(client_resources)
-            num_actors = 2
+            num_actors = pool_size_from_resources(client_resources)
             actors = [create_actor_fn() for _ in range(num_actors)]
         else:
             # When __reduce__ is executed, we don't want to created
