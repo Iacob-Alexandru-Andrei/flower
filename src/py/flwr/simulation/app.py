@@ -40,7 +40,7 @@ from flwr.simulation.ray_transport.ray_actor import (
     pool_size_from_resources,
 )
 from flwr.simulation.ray_transport.ray_client_proxy import RayActorClientProxy
-from src.py.flwr.simulation.ray_transport.fn_client_proxy import FnClientProxy
+from flwr.simulation.ray_transport.fn_client_proxy import FnClientProxy
 
 INVALID_ARGUMENTS_START_SIMULATION = """
 INVALID ARGUMENTS ERROR
