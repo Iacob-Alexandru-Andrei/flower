@@ -199,7 +199,8 @@ class VirtualClientEngineActorPool(ActorPool):
         if actor_list is None:
             # Figure out how many actors can be created given the cluster resources
             # and the resources the user indicates each VirtualClient will need
-            num_actors = pool_size_from_resources(client_resources)
+            # num_actors = pool_size_from_resources(client_resources)
+            num_actors = 2
             actors = [create_actor_fn() for _ in range(num_actors)]
         else:
             # When __reduce__ is executed, we don't want to created
